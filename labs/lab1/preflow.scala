@@ -19,7 +19,7 @@ case class Source(n: Int) // send to the source node, and inform the height the 
 case class IncomingFlow(n: Int) // flow was sent by source
 case class OutgoingFlow(n: Int) // flow was received by sink  
 case class PushRequest(node: Int, edge : Edge, flow: Int, height: Int)
-case class Reject(flow: Int)
+case class Reject(flow: Int, edge: Edge)
 case class Done(status: Boolean)
 case class TerminationCheck(epoch: Int)
 case class TerminationResponse(nodeIndex: Int, isDone: Boolean, epoch: Int)
@@ -161,13 +161,7 @@ class Node(val index: Int) extends Actor {
 		//}
 		if(!source && !sink){ self ! Hello }
 		else{
-			if (edge.u == sender){
-				edge.f -= flow // forward-push request
-			}
-			else{
-				edge.f += flow // backward-push request
-			}
-			sender ! Reject(flow)
+			sender ! Reject(flow,edge)
 		}
 
     case Control(control:ActorRef)	=> {
