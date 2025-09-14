@@ -8,313 +8,449 @@ import scala.concurrent.{Await,ExecutionContext,Future,Promise}
 import scala.concurrent.duration._
 import scala.language.postfixOps
 import scala.io._
+import math.min
+import math.abs
+import scala.concurrent.ExecutionContext.Implicits.global
 
-case class Flow(f: Int)
+case class Flow(f: Int) // case class for data with parameters
 case class Debug(debug: Boolean)
 case class Control(control:ActorRef)
-case class Source(n: Int)
+case class Source(n: Int) // send to the source node, and inform the height the source would have. 
+case class IncomingFlow(n: Int) // flow was sent by source
+case class OutgoingFlow(n: Int) // flow was received by sink  
+case class PushRequest(node: Int, edge : Edge, flow: Int, height: Int)
+case class Reject(flow: Int)
+case class Done(status: Boolean)
+case class TerminationCheck(epoch: Int)
+case class TerminationResponse(nodeIndex: Int, isDone: Boolean, epoch: Int)
+case class NodeActivity(nodeIndex: Int, isActive: Boolean)
 
-case class Push(from: ActorRef, edge: Edge, amount: Int)  //Push message to send
-case class Active(n:ActorRef)
-case class Inactive(n:ActorRef)
-case class Pending(n:Int)
-case class HeightRequest(node: ActorRef)
-case class HeightResponse(node: ActorRef, h: Int)
-
-case object Print
+case object Print // case object for singletons for parameterless messages. 
 case object Start
 case object Excess
 case object Maxflow
 case object Sink
 case object Hello
-case object Work
-case object HeightRequest
+case object Accept
+case object GetHeight
+case object IsDone
+
 
 class Edge(var u: ActorRef, var v: ActorRef, var c: Int) {
-	var	f = 0
+    var	f = 0
 }
 
 class Node(val index: Int) extends Actor {
-	var	e = 0;				/* excess preflow. 						*/
-	var	h = 0;				/* height. 							*/
-	var	control:ActorRef = null		/* controller to report to when e is zero. 			*/
-	var	source:Boolean	= false		/* true if we are the source.					*/
-	var	sink:Boolean	= false		/* true if we are the sink.					*/
-	var	edge: List[Edge] = Nil		/* adjacency list with edge objects shared with other nodes.	*/
-	var	debug = false			/* to enable printing.						*/
+    var	e = 0;				/* excess preflow. 						*/
+    var	h = 0;				/* height. 							*/
+    var	control:ActorRef = null		/* controller to report to when e is zero. 			*/
+    var	source:Boolean	= false		/* true if we are the source.					*/
+    var	sink:Boolean	= false		/* true if we are the sink.					*/
+    var	edge: List[Edge] = Nil		/* adjacency list with edge objects shared with other nodes.	*/
+    var	debug = false			/* to enable printing. */
+    var pushRequest = 0
+    var listIndex = 0 						
+    /* index, e , h is attributes (member variables or instance variables), which hold the state of 
+        each node object. */
+    var wasActive = false
+
+    def min(a:Int, b:Int) : Int = { if (a < b) a else b }
+
+    def id: String = "@" + index;
+
+    def other(a:Edge, u:ActorRef) : ActorRef = { if (u == a.u) a.v else a.u }
+
+    def status: Unit = { if (debug) println(id + " e = " + e + ", h = " + h) }
+
+    def custom_print (str: String): Unit = 
+        {if (debug) println(str +s" mess from ${id}")}
     
-	
-	def min(a:Int, b:Int) : Int = { if (a < b) a else b }
 
-	def id: String = "@" + index;
-
-	def other(a:Edge, u:ActorRef) : ActorRef = { if (u == a.u) a.v else a.u }
-
-	def status: Unit = { if (debug) println(id + " e = " + e + ", h = " + h) }
-
-	def enter(func: String): Unit = { if (debug) { println(id + " enters " + func); status } }
-	def exit(func: String): Unit = { if (debug) { println(id + " exits " + func); status } }
-
-	def relabel : Unit = {
-
-		enter("relabel")
-
-		h += 1
-
-		exit("relabel")
-        control ! Active(self)
-	}
-
-
-    def tryPush(): Unit = {
-      edges.foreach{ edge => 
-       val otherNode = other(edge,self) 
+    def updateActivity(): Unit = {
+      //active if has excess, pending requests and not source or sink
+      val currentlyActive = (e > 0 || pushRequest > 0) && !source && !sink  
+      if(currentlyActive != wasActive){
+        wasActive = currentlyActive
+        if(control != null){
+          control ! NodeActivity(index, currentlyActive)
+        }
       }
     }
 
-	def receive = {
 
-	case Debug(debug: Boolean)	=> this.debug = debug
 
-	case Print => status
-
-	case Excess => { sender ! Flow(e) /* send our current excess preflow to actor that asked for it. */ }
-
-	case edge:Edge => { this.edge = edge :: this.edge /* put this edge first in the adjacency-list. */ }
-
-	case Control(control:ActorRef)	=> this.control = control
-
-	case Sink	=> { sink = true }
-
-	case Source(n:Int)	=> { h = n; source = true; control ! Active(self) }
-
-    case Push(from, e, delta) => {
-      this.e += delta   //increase excess
-      control ! Pending(-1)
-
-      if(!sink && e > 0){
-        control ! Active(self)
+    def start_push : Unit = {
+      // var start_flow = 0;
+      for (ed <- edge){  
+        if (ed.u == self){ // forward-push from start
+          // custom_print("start to push to " + ed.v)
+          ed.f = ed.c
+          e -= ed.c
+          ed.v ! PushRequest(index, ed, ed.c, h)
+          pushRequest += 1
+        }
       }
+      updateActivity()
+      //println(s"flow from source from beginning ${start_flow} excess preflow from source ${e} ")
+    }
+
+    def enter(func: String): Unit = { if (debug) { println(id + " enters " + func); status } } // helper fuunction for debug
+    def exit(func: String): Unit = { if (debug) { println(id + " exits " + func); status } } // helper fuunction for debug
+
+    def relabel : Unit = {
+        enter("relabel")
+        h += 1
+        exit("relabel")
+    }
+    
+    def pushToNeighbours() : Unit ={
+        if(pushRequest > 0) return // wait until the excess flow updated correctly (the last accept or reject)			 
+
+        if (!sink && !source && e > 0){
+            if (listIndex == edge.length ) {
+                listIndex = 0
+                relabel
+            }
+            for(i <- listIndex until edge.length){
+                if (e == 0){
+                  updateActivity()
+                    return
+                }
+                var currentEdge = edge(i);
+                if (currentEdge.u == self && currentEdge.f < currentEdge.c ){ // forward-push 
+                  var flowToPush = min(e, currentEdge.c - currentEdge.f)
+                  e -= flowToPush
+                  currentEdge.f += flowToPush
+                  currentEdge.v ! PushRequest(index, currentEdge, flowToPush, h)
+                  pushRequest += 1
+
+                }else if(currentEdge.v == self && currentEdge.f > 0){ // backward-push 
+                  var flowToPushBack = min(e, currentEdge.f)
+                  e -= flowToPushBack
+                  currentEdge.f -= flowToPushBack
+                  currentEdge.u ! PushRequest(index, currentEdge, flowToPushBack, h)
+                  pushRequest += 1
+                }
+                listIndex +=1	 
+            }	  
+        }
+        updateActivity()
+        if (!sink && ! source && e > 0 ) pushToNeighbours // after the loop, if there's still excess preflow left
+    }
+
+
+    def receive = {
+
+    case Debug(debug: Boolean)	=> this.debug = debug /* used to set the debug flag to true */
+
+    case Print => status
+
+    case Excess => { sender ! Flow(e) /* send our current excess preflow to actor that asked for it. */ }
+
+    case edge:Edge => { this.edge = edge :: this.edge /* put this edge first in the adjacency-list. */ }
+
+    case Control(control:ActorRef)	=> {
+      this.control = control
+      updateActivity()  //report initial state
+    }
+
+    case Sink	=> { 
+      sink = true
+      // custom_print("set to sink ") 
+    } 
+    // when receiving the message from the controller, indicating the node is a sink
+    // the sink attribute sets to true. 
+
+    case Source(n:Int)	=> { 
+      // custom_print("set to source")
+      h = n; 
+      source = true
+      start_push
+    }
+    /* while receving this the source flag would be set to true */ 
+
+    case PushRequest(node: Int, edge : Edge, flow: Int, height: Int) => {
+        // custom_print("get push request from "  +id )
+        var sender = other(edge, self)
+        if (height > h){
+            e += flow
+            sender ! Accept
+            if (sink) control ! OutgoingFlow(e)
+            if (source) control ! IncomingFlow(e)
+        }
+        else{
+            if (edge.u == sender){
+                edge.f -= flow // forward-push request
+            }
+            else{
+                edge.f += flow // backward-push request
+            }
+            sender ! Reject(flow)
+        }
+        
+        updateActivity()  //update activity after processing a push
+        if(!sink && ! source) pushToNeighbours
     } 
 
-    case Work => {
-      if (source && e == 0){
-        //initial pushes
-        edges.foreach{ edge => 
-          if(self == edge.u){
-            val delta = edge.c
-            edge.f += delta
-            e -= delta
-            edge.v ! Push(self, edge, delta)
-            control ! Pending(1)
-          }
+    case Accept => {
+        // custom_print("push acepted " + id)
+        pushRequest -= 1
+        updateActivity()
+        pushToNeighbours()
+        
+        if(source){
+            control ! IncomingFlow(e)
         }
-      }
-
-      if(e > 0 && !sink){
-        //push logic
-        var pushed = false
-
-        //push to all neighbour nodes
-        edges.foreach { edge => 
-          val otherNode = other(edge,self)
-          val residual = if(self == edge.u) edge.c - edge.f else edge.f
-          val delta = min(e, residual) //min between current nodes excess and residual
-
-          if(delta > 0){
-            otherNode ! HeightRequest //if we have flow to push check other nodes height
-            pushed = true
-          }
-        }
-
-        if(!pushed && e > 0){
-          //couldnt push to neighbours -> relabel
-          relabel()
-          // control ! Active(self)  //might have to uncomment this
-        }
-
-      }
     }
 
-    case HeightRequest => sender ! HeightResponse(self, h) //send node height to requesting sender
-
-    case HeightResponse(node, otherHeight) => {
-      //find edge to responding node
-      edges.find(edge => other(edge, self) == node).foreach{ edge => 
-        val residual = if(self == edge.u) edge.c - edge.f else edge.f
-        val delta = min(e, residual)
-
-        if(delta > 0 && this.h > otherHeight){
-          //Requirements met, push
-          if(self == edge.u) edge.f += delta else edge.f -= delta
-          e -= delta
-        node ! Push(self, edge, delta)
-        control ! Pending(1)
-        }
-      }
-      
-      //Check activity after pushes
-      if(e > 0){ 
-        control ! Active(self) 
-      }else{
-        control ! Inactive(self)
-      }
-
+    case Reject(flow: Int) => {
+        // custom_print("push rejected " + id)
+        pushRequest -= 1
+        e += flow
+        updateActivity()
+        pushToNeighbours()
     }
 
+    case TerminationCheck(epoch: Int) => {
+      val isDone = (e == 0 && pushRequest == 0)
+      control ! TerminationResponse(index, isDone, epoch)
+    }
+
+    case IsDone => {
+        // custom_print("get finish request from controller, current flow: " +e)
+        if (e == 0 && pushRequest == 0){
+            control ! Done(true)
+        }else{
+            control ! Done(false)
+        }
+
+    }
+    
     case _		=> {
-      println("" + index + " received an unknown message" + _) 
+        println("" + index + " received an unknown message" + _) }
+
+        assert(false)
     }
 
-    assert(false)
-    }
-
-    // def push(e: Edge): Unit = {
-    //   val v = other(e, self) //find other endpoint
-    //   val residual = 
-    //     if(self == e.u) e.c - e.f //if starting node
-    //     else e.f  //latter node
-    //
-    //     val delta = min(this.e, residual) //min to push
-    //
-    //     if(delta > 0 && this.h > getHeight(v) + 1){
-    //       if(self == e.u) e.f += delta else e.f -= delta
-    //
-    //       this.e -= delta //in any case reduce edge flow
-    //       updateActivity()
-    //       control ! Pending(1)
-    //       v ! Push(self, e, delta)
-    //     }
-    // }
+    
 
 }
 
 
 class Preflow extends Actor
 {
-	var	s	= 0;			/* index of source node.					*/
-	var	t	= 0;			/* index of sink node.					*/
-	var	n	= 0;			/* number of vertices in the graph.				*/
-	var	edge:Array[Edge]	= null	/* edges in the graph.						*/
-	var	node:Array[ActorRef]	= null	/* vertices in the graph.					*/
-	var	ret:ActorRef 		= null	/* Actor to send result to.					*/
-    var activeNodes = Set.empty[ActorRef]
-    var pendingMessages = 0
+    var	s	= 0;			/* index of source node.					*/
+    var	t	= 0;			/* index of sink node.					*/
+    var	n	= 0;            /* number of vertices in the graph.				*/
+    var	edge:Array[Edge]	= null	/* edges in the graph.						*/
+    var	node:Array[ActorRef]	= null	/* vertices in the graph.					*/
+    var	ret:ActorRef 		= null	/* Actor to send result to.					*/
+    var incommingFlow = 0;
+    var outgoingFlow = 0;
+    var counter = 0 
 
-	def receive = {
+    var terminationEpoch = 0
+    var nodeResponses: Map[Int, (Boolean, Int)] = Map() //Node index -> (isDone, time epoch)
+    var isTerminating = false
+    var activeNodes = Set[Int]()  //tracking which nodes are currently active
 
-	case node: Array[ActorRef]	=> {
-		this.node = node
-		n = node.size
-		s = 0
-		t = n-1
-		for (u <- node)
-			u ! Control(self)
 
-        //initialize sink and source
-        node(0) ! Source(node.length)
-        node(node.length - 1) ! Sink
-	}
+    def sendFinishRequestToNodes(): Unit = {
+      if(isTerminating) return  //already in terminating process, exit
 
-	case edge:Array[Edge] => this.edge = edge
+      isTerminating = true
+      terminationEpoch += 1
+      nodeResponses = Map()
 
-	case Flow(f:Int) => {
-		ret ! f			/* somebody (hopefully the sink) told us its current excess preflow. */
-	}
+        for (i <- 1 until node.length -1){ // the Finnish request sends to all the nodes, except sink and source 
+            node(i) ! TerminationCheck(terminationEpoch)
+        }
+    }
 
-	case Maxflow => {
-		ret = sender
-        checkDone()
-        // if(activeNodes.isEmpty){
-        //   node(t) ! Excess	/* ask sink for its excess preflow (which certainly still is zero). */
-        // }
-	}
 
-    case Active(n) => { 
-      if(!activeNodes.contains(n)){
-        activeNodes += n 
-        n ! Work
+
+    def checkTerminationComplete(): Unit = {
+      val expectedResponses = node.length - 2 //All nodes except source and sink
+
+      if(nodeResponses.size == expectedResponses){
+        val allCurrentEpoch = nodeResponses.values.forall(_._2 == terminationEpoch)
+        val allInactive = nodeResponses.values.forall(_._1 == true)
+
+        if(allCurrentEpoch && allInactive){
+          if(activeNodes.isEmpty){
+            ret ! outgoingFlow
+            return
+          }
+        }
+
+        isTerminating = false
+        nodeResponses = Map()
       }
     }
 
-    case Inactive(n) => { 
-      activeNodes -= n 
-      checkDone()
+    //Track node activity
+    def registerNodeActivity(nodeIndex: Int, isActive: Boolean): Unit = {
+      if(isActive){
+        activeNodes += nodeIndex
+      }else{
+        activeNodes -= nodeIndex
+      }
+
+      if(isTerminating && isActive){
+        isTerminating = false
+        nodeResponses = Map()
+      }
     }
 
 
-    case Pending(d) => {
-      pendingMessages += d
-      checkDone()
+    def receive = {
+
+    case node:Array[ActorRef]	=> {
+        this.node = node
+        n = node.size
+        s = 0
+        t = n-1
+        for (u <- node){
+            u ! Control(self)
+            //u ! Debug(true)
+        }	
+
+        //set sink and source            
+        node(t) ! Sink
+        node(s) ! Source(n) // note: use node(index) for array access.
+        //node(s) ! Start
+        
+    }
+    /* 
+        Receives the array of node actors, stores it n,s,t, tells each node who thee controller is.
+     */
+
+    case edge:Array[Edge] => this.edge = edge
+    /* 
+        receive the array of edges and stores it
+     */
+
+    
+    /* 
+        recive the flow value (from the sink node), and sends it to actor stored in ret
+
+     */
+
+    case Maxflow => {
+        ret = sender
+        //node(t) ! Excess	/* ask sink for its excess preflow (which certainly still is zero). */
+    }
+    
+    case IncomingFlow(flow: Int) => {
+        // println("get flow from source " + flow)
+        incommingFlow = abs(flow)
+        if (incommingFlow == outgoingFlow && !isTerminating){
+            sendFinishRequestToNodes()
+        }
     }
 
-    // case HeightRequest(node) => {
-    //   val height = heightCache
+    case OutgoingFlow(flow: Int) => {
+        // println("get flow from sink " + flow)
+        outgoingFlow = flow
+        if(outgoingFlow == incommingFlow && !isTerminating){
+            sendFinishRequestToNodes()
+        }
+    }
+
+
+    case TerminationResponse(nodeIndex: Int, isDone: Boolean, epoch: Int) => {
+      if(epoch == terminationEpoch && isTerminating){
+        nodeResponses += (nodeIndex -> (isDone, epoch))
+        checkTerminationComplete()
+      }
+      //ignore old epoch responses
+    }
+
+    case NodeActivity(nodeIndex: Int, isActive: Boolean) => {
+      registerNodeActivity(nodeIndex, isActive)
+    }
+
+
+    
+    // case Done(status : Boolean) => {
+    //     // println("Controller get feedback from IsDone request: " + status)
+    //     if(!isTerminating) return
+    //
+    //     if (status){
+    //         counter += 1 
+    //         if (counter == (node.length - 2)){ // all nodes (exclusive source and sink ) have no excess flow left.
+    //             ret ! outgoingFlow
+    //         }
+    //     }else{
+    //       isTerminating = false
+    //       nodeResponses = Map()
+    //         // counter = 0 // wait for next update from sink or source
+    //     }
     // }
+        
+    
 
-	}
-
-    def checkDone(): Unit = {
-      if(ret != null && activeNodes.isEmpty && pendingMessages == 0){ //done only when no active nodes remain and no messages are pending
-        node.last ! Excess
-      }
-
-    } 
-
+    }
 }
 
 object main extends App {
-	implicit val t = Timeout(4 seconds);
+    implicit val t = Timeout(120.seconds);
 
-	val	begin = System.currentTimeMillis()
-	val system = ActorSystem("Main")
-	val control = system.actorOf(Props[Preflow], name = "control")
+    val	begin = System.currentTimeMillis()
+    val system = ActorSystem("Main")
+    val control = system.actorOf(Props[Preflow], name = "control")
 
-	var	n = 0;
-	var	m = 0;
-	var	edge: Array[Edge] = null
-	var	node: Array[ActorRef] = null
+    var	n = 0;
+    var	m = 0;
+    var	edge: Array[Edge] = null
+    var	node: Array[ActorRef] = null
 
-	val	s = new Scanner(System.in);
+    val	s = new Scanner(System.in);
 
-	n = s.nextInt
-	m = s.nextInt
+    n = s.nextInt
+    m = s.nextInt
 
-	/* next ignore c and p from 6railwayplanning */
-	s.nextInt
-	s.nextInt
+    //println(s"node ${n} nbr edges ${m} ")
+    /* next ignore c and p from 6railwayplanning */
+    s.nextInt
+    s.nextInt
 
-	node = new Array[ActorRef](n)
+    node = new Array[ActorRef](n)
 
-	for (i <- 0 to n-1)
-		node(i) = system.actorOf(Props(new Node(i)), name = "v" + i)
+    for (i <- 0 to n-1)
+        node(i) = system.actorOf(Props(new Node(i)), name = "v" + i)
+    // create node
+    edge = new Array[Edge](m)
+    // create edges
+    for (i <- 0 to m-1) {
 
-	edge = new Array[Edge](m)
+        val u = s.nextInt
+        val v = s.nextInt
+        val c = s.nextInt
+        
+        //println(s"edge from ${u} to ${v} capacity ${c}")
+        edge(i) = new Edge(node(u), node(v), c)
 
-	for (i <- 0 to m-1) {
+        node(u) ! edge(i)
+        node(v) ! edge(i)
+    }
 
-		val u = s.nextInt
-		val v = s.nextInt
-		val c = s.nextInt
+    control ! node // "fire-and-forget" message, sends the array of node actors to Preflow actor
+    control ! edge // the message is delivered and processed whenever the receiver is ready.
 
-		edge(i) = new Edge(node(u), node(v), c)
+    val flow = control ? Maxflow 
+    /*
+        Asynchronous "ask" pattern (request-response)
+        Sends Maxflow message to the Preflow actor and expects a reply.  
+    */
+    val f = Await.result(flow, t.duration)
 
-		node(u) ! edge(i)
-		node(v) ! edge(i)
-	}
+    println(s"f = $f")
 
-	control ! node
-	control ! edge
+    system.stop(control);
+    system.terminate()
 
-	val flow = control ? Maxflow
-	val f = Await.result(flow, t.duration)
+    val	end = System.currentTimeMillis()
 
-	println("f = " + f)
-
-	system.stop(control);
-	system.terminate()
-
-	val	end = System.currentTimeMillis()
-
-	println("t = " + (end - begin) / 1000.0 + " s")
+    //println("t = " + (end - begin) / 1000.0 + " s")
 }

@@ -1,0 +1,7 @@
+[error] /home/tolerror/programming/school/multicore/labs/lab1/preflow.scala:248:34: not found: type Boolena
+[error]     var nodeResponses: Map[Int, (Boolena, Int)] = Map() //Node index -> (isDone, time epoch)
+[error]                                  ^
+[error] /home/tolerror/programming/school/multicore/labs/lab1/preflow.scala:372:28: method receive has return statement; needs result type
+[error]         if(!isTerminating) return
+[error]                            ^
+[error] two errors found
