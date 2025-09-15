@@ -4,6 +4,9 @@ import java.util.ListIterator;
 import java.util.LinkedList;
 import java.lang.Math;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.Queue;
+import java.util.ArrayDeque;
 
 import java.io.*;
 
@@ -14,24 +17,55 @@ class Graph {
 	int	n;
 	int	m;
 	Node	excess;		// list of nodes with excess preflow
+    int numThreads;
+    ConcurrentLinkedQueue<Node>[] externalQueue;
 	Node	node[];
 	Edge	edge[];
 
-	Graph(Node node[], Edge edge[])
+	Graph(Node node[], Edge edge[], int numThreads)
 	{
 		this.node	= node;
 		this.n		= node.length;
 		this.edge	= edge;
 		this.m		= edge.length;
+        this.numThreads = numThreads;
+
+        ConcurrentLinkedQueue<Node>[] tmp = new ConcurrentLinkedQueue[numThreads];
+        for(int i = 0 ; i < numThreads ; i++){
+            tmp[i] = new ConcurrentLinkedQueue<>();
+        }
+        this.externalQueue = tmp;
 	}
 
-	void enter_excess(Node u)
-	{
+    //returns which thread owns node
+    int ownerThread(int nodeIndex){
+        int nodesPerThread = (n + numThreads - 1) / numThreads;
+        return Math.min(nodeIndex / nodesPerThread, numThreads - 1);    
+    }
+
+    void enqueueExternal(Node u){
+        int owner = ownerThread(u.i);
+        externalQueue[owner].offer(u);
+    }
+
+    Node dequeueExternal(int threadID){
+        return externalQueue[threadID].poll();
+    }
+
+    boolean hasExternalWork(int threadID){
+        return !externalQueue[threadID].isEmpty();
+    }
+
+
+	void enter_excess(Node u){
 		if (u != node[s] && u != node[t]) { //if u not sink or source, eligible
 			u.next = excess;    //linked list add in front
 			excess = u;
 		}
 	}
+
+    
+
 
     Node other(Edge a, Node u){
         if (a.u == u)	
@@ -40,24 +74,41 @@ class Graph {
         return a.u;
     }
 
-	void relabel(Node u){
-        u.h++;
+    void relabel(Node u){
+            int minHeight = Integer.MAX_VALUE;
+            for(Edge a : u.adj){
+                Node v = other(a,u);
+                int residual = (u == a.u) ? a.c-a.f : a.c+a.f;
+                if(residual > 0){
+                    minHeight = Math.min(minHeight, v.h);
+                }
+            }
+            u.h = minHeight + 1;
+
         // enter_excess(u);    //u is now active
-	}
+    }
 
     //we need to lock each node, there is no going around it
     void lockNode(Node u){
        node[u.i].lock.lock(); 
     }
 
-    void lockNode(Node u){
-        node[u.i].lock.lock();
+    void unlockNode(Node u){
+        node[u.i].lock.unlock();
     }
 
 	void push(Node u, Node v, Edge a){
         int d;  //min capacity to push
 
-        lockNode(u);    //we need to make sure to lock all nodes in the same order, lock first u then v
+        //global locking order
+        // if(u.i < v.i){
+        //     lockNode(u);
+        //     lockNode(v);
+        // }else{
+        //     lockNode(v);
+        //     lockNode(u);
+        // }
+
         //check which direction we're facing
         if(u == a.u){   //if u is from
             d = Math.min(u.e, a.c - a.f);  //current excess in u or the remaining capacity on edge
@@ -72,21 +123,22 @@ class Graph {
 
         
         //if u happen to have more excess, reinsert in active node list
-        if(u.e > 0){
-            enter_excess(u);
-        }
+        // if(u.e > 0){
+        //     enter_excess(u);
+        // }
 
         //if v's excess == d, we know that v excess was previously 0 (inactive). 
         //So we don't risk inserting it twice if it was already active.
-        if(v.e == d){   
-            enter_excess(v);
-        }
+        // if(v.e == d){   
+        //     enter_excess(v);
+        // }
 
-        unlockNode(u);
+        // unlockNode(v);
+        // unlockNode(u);
         
 	}
 
-	int preflow(int s, int t){
+	int preflow(int s, int t, int numThreads){  
 
 		ListIterator<Edge>	iter;
 		int			    b;
@@ -99,53 +151,37 @@ class Graph {
 		node[s].h = n;  //set source height to number of nodes
 
 		iter = node[s].adj.listIterator();
+        //initial pushes
 		while (iter.hasNext()) {    //for all of sources edges
 			a = iter.next();
 
 			node[s].e += a.c;   //sum up the total flow from source in source excess variable
 
-			push(node[s], other(a, node[s]), a);    //push along all nodes of source
-		}
+            push(node[s], other(a, node[s]), a);    //push along all nodes of source
+        }
 
-		while (excess != null) {    //as long as active node list isnt empty
-			u = excess; //set u to node fetched from list
-			v = null;   //initially null, will set after
-			a = null;   //initially null, will set after
-			excess = u.next;    //next node
+        int nodesPerThread = (n + numThreads - 1) / numThreads;
 
-            boolean pushed = false; 
-			iter = u.adj.listIterator();    
-			while (iter.hasNext()) {    //iterate through all of u's adjacent edges
-				a = iter.next();    //fetch one edge
-                v = other(a, u);    //other end node of edge
+        Thread[] threads = new Thread[numThreads];
+        for(int threadID = 0 ; threadID < numThreads ; threadID++){
+            //For each Thread calculate a range of nodes to work on
+            int start = threadID * nodesPerThread;
+            int end = Math.min(start + nodesPerThread, n);
 
-                int residual;
-                if(u == a.u){   //if going from u
-                    residual = a.c - a.f;   //residual = remaining flow capacity of edge
-                }else{          //if going from v
-                    residual = a.c + a.f;   //residual = all capacity on edge + currently flowing 
-                }
+            threads[threadID] = new Thread(new Task(this, start, end, threadID));
+            threads[threadID].start();
+        }
 
-                //push requirement: if res > 0 AND height of pushing node > height of other node
-                if(residual > 0 && u.h > v.h){  
-                    push(u,v,a);    //push along u -> v on edge a
-                    pushed = true;  
-                    break;  //we managed to push along one of u's edges, break out of checking remaining edges
-                }
-
-			}
-
-            if(!pushed){    //if we didnt manage to push, relabel u
-                relabel(u);
+	
+        for(Thread th : threads){
+            try{
+                th.join();  //wait for all threads to finish
+            }catch(InterruptedException e){
+                e.printStackTrace();
             }
-
-		// 	if (v != null)
-		// 		push(u, v, a);
-		// 	else
-		// 		relabel(u);
-		}
-
-		return node[t].e;   //return max flow at sink
+        }    
+        
+		return node[this.t].e;   //return max flow at sink
 	}
 }
 
@@ -186,11 +222,11 @@ class Preflow {
 		Scanner s = new Scanner(System.in);
 		int	n;  //number of nodes
 		int	m;  //number of edges
-		int	i;
-		int	u;
-		int	v;
-		int	c;
-		int	f;
+		int	i;  //node list index
+		int	u;  //u node index
+		int	v;  //v node index
+		int	c;  //capacity
+		int	f;  //flow
 		Graph	g;
 
 		n = s.nextInt();
@@ -212,30 +248,12 @@ class Preflow {
 			node[v].adj.addLast(edge[i]);
 		}
 
-		g = new Graph(node, edge);
+        int numThreads = 8; //TODO: Dynamically set thread count based on node count
+
+		g = new Graph(node, edge, numThreads);
         //INPUT HANDLING %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-       
-        int NUM_THREADS = 8;    //TODO: to dynamically and efficiently set NUM_THREADS based on number of nodes
-
-        //Thread work delegation
-        int nodesPerThread = (n + NUM_THREADS - 1) / NUM_THREADS;
-
-        // ReentrantLock[] nodeLocks = new ReentrantLock[n];
-        // for(int i = 0 ; i < n ; i++) nodeLocks[i] = new ReentrantLock();
-
-        Thread[] threads = new Thread[NUM_THREADS];
-        for(int threadID = 0 ; threadID < NUM_THREADS ; threadID++){
-            //For each Thread calculate a range of nodes to work on
-            int start = threadID * nodesPerThread;
-            int end = Math.min(start + nodesPerThread, n);
-
-            threads[threadID] = new Thread(new Task(g, start, end));
-            threads[threadID].start();
-        }
-
-        for(Thread t : threads) t.join();   //wait for all threads to finish
-
-		// f = g.preflow(0, n-1);  //pass in source and sink indexes
+      
+		f = g.preflow(0, n-1, numThreads);  //pass in source and sink indexes
 		double	end = System.currentTimeMillis();
 		System.out.println("t = " + (end - begin) / 1000.0 + " s");
 		System.out.println("f = " + f);
@@ -245,76 +263,100 @@ class Preflow {
 
 class Task implements Runnable{
 
-    private final int start, end;
+    private final int start, end, threadID;
     private final Graph g;
     private final Queue<Node> localq = new ArrayDeque<>();
 
-    Task(Graph g, int start, int end){
+    Task(Graph g, int start, int end, int threadID){
         this.g = g;
         this.start = start;
         this.end = end;
+        this.threadID = threadID;
 
+        //add all active nodes to node local queue
         for(int i = start ; i < end ; i++){
             if(g.node[i].e > 0 && i != g.s && i != g.t){
                 localq.add(g.node[i]);
             }
         }
-
     }
 
     @Override
     public void run(){
-        while(!localq.isEmpty()){
+
+        while(!localq.isEmpty() || g.hasExternalWork(threadID)){  //terminates if this is not true
             Node u = localq.poll();
+            if(u == null){
+                u = g.dequeueExternal(threadID);
+                if(u == null) continue;
+            }
 
-            boolean pushed = false;
-            for(Edge a : u.adj){
-                Node v = g.other(a, u);
+            u.lock.lock();
+            try{
 
-                int residual = (u == a.u) ? a.c-a.f : a.c+a.f;
+                boolean pushed = false;
 
-                if(residual > 0 && u.h > v.h){
+                //iterate neighbour edges of u
+                for(Edge a : u.adj){
+                    Node v = g.other(a, u);
 
-                    //is node outside threads assigned chunk? Lock it
-                    g.lockEdge(a);
+                    Node first = (u.i < v.i) ? u : v;
+                    Node second = (u.i < v.i) ? v : u;
+
+                    if(second != u) second.lock.lock();
                     try{
-                        g.push(u,v,a);
-                    }finally{   //ensure that we unlock before leaving
-                        g.unlockEdge(a)
-                        }
-                    }
 
-                        //if u still has excess, add it back into the local queue
-                        if(u.e > 0 && u.i >= start && u.i < end){
-                            localq.add(u);
-                        }
+                        int residual = (u == a.u) ? a.c-a.f : a.c+a.f;
 
-                        //if v still has excess, add it back into local/external queue
-                        if(v.e > 0){
-                            //if v is within threads range
-                            if(v.i >= start && v.i < end){
-                                localq.add(v);
-                            }else{
-                                g.enqueueExternal(v);
+                        if(residual > 0 && u.h > v.h){
+                            g.push(u,v,a);
+
+
+                            //handle queues
+                            if(u.e > 0 && u.i >= start && u.i < end){
+                                localq.add(u);
                             }
-                        }
 
-                        pushed = true;
-                        break;
+                            //if v still has excess, add it back into local/external queue
+                            if(v.e > 0){
+                                //if v is within threads range
+                                if(v.i >= start && v.i < end){
+                                    localq.add(v);
+                                }else{
+                                    g.enqueueExternal(v);
+                                }
+                            }
+
+                            pushed = true;
+                            // break;
+                        }
+                    }finally{
+                        if(second != u) second.lock.unlock();
                     }
                 }
 
                 if(!pushed){
                     g.relabel(u);
+
                     if(u.e > 0){
-                        localq.add(u);
+                        if(u.i >= start && u.i < end){
+                            localq.add(u);
+                        }else{
+                            g.enqueueExternal(u);
+                        }
+
                     }
                 }
 
+            }finally{
+                u.lock.unlock();
             }
+
+
+
         }
-
-
     }
+
+
 
 }
