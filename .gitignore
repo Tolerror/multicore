@@ -8,3 +8,6 @@ project/.bloop/
 
 # SBT distribution
 sbt-dist/
+
+# generated files: 
+.class
