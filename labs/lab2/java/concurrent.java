@@ -90,8 +90,8 @@ class Graph {
 
     //we need to lock each node, there is no going around it
     void lockNode(Node u){
-       node[u.i].lock.lock(); 
-    }
+       node[u.i].lock.lock(); // u.i gets the index -> node[u.i] get the current node -> get lock  
+    }                         // -> execute lock-method.
 
     void unlockNode(Node u){
         node[u.i].lock.unlock();
