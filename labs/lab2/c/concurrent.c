@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h> // for using the boolean value.
 #include <pthread.h> // import the lib for using thread in C 
 
 #define PRINT		0	/* enable/disable prints. */
@@ -98,6 +99,7 @@ struct graph_t {
 	node_t*		t;	/* pointer to the sink.			*/
 	node_t*		excess;	/* nodes with e > 0 except s,t.	*/
 	pthread_mutex_t graph_lock;
+	pthread_cond_t excess_cond;
 };
 
 /* a remark about C arrays. the phrase above 'array of n nodes' is using
@@ -332,6 +334,7 @@ static graph_t* new_graph(FILE* in, int n, int m) // return an adress (pointer) 
 	g->t = &g->v[n-1];						   // &g->v[0] the address of the first node
 	g->excess = NULL;                          // &g->v[n-1] gets the address of the last element in array v
     pthread_mutex_init(&g->graph_lock,NULL);   // init the lock for the whole graph.
+	pthread_cond_init(&g->excess_cond,NULL);
 	for (i = 0; i < m; i += 1) {               // loop through all edges
 		a = next_int();  
 		b = next_int();
@@ -439,10 +442,25 @@ static node_t* other(node_t* u, edge_t* e)
 		return e->u;
 }
 
+bool predicate (graph_t* g){
+	if (g->excess != NULL){
+		return true;
+	}
+	return false ;
+}
+
+
 void *worker_function (void* g ){
 	// TODO: the work function to passed into the thread_create
 	graph_t* graph = (graph_t*) g;
 	printf("from thread \n");
+	pthread_mutex_lock(&graph->graph_lock);
+	while(!predicate(graph)){
+		printf("from predicate: false \n");
+		pthread_cond_wait(&graph->excess_cond,&graph->graph_lock); // based on the value of the predicate 
+	}
+	// Take a work_here															   // the thread would release the lock and wait, or else
+	pthread_mutex_unlock(&graph->graph_lock);
 	return NULL; 
 }
 
@@ -541,7 +559,7 @@ static void free_graph(graph_t* g)   // this function releases all the memory al
 	list_t*		p;					 // allocated memory.
 	list_t*		q;
 
-	for (i = 0; i < g->n; i += 1) {
+	for (i = 0; i < g->n; i += 1) {  // ADD the logic for destroying lock and condtion here.
 		p = g->v[i].edge;
 		while (p != NULL) {
 			q = p->next;
