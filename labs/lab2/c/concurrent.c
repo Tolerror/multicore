@@ -1,31 +1,4 @@
-/* This is an implementation of the preflow-push algorithm, by
- * Goldberg and Tarjan, for the 2021 EDAN26 Multicore programming labs.
- *
- * It is intended to be as simple as possible to understand and is
- * not optimized in any way.
- *
- * You should NOT read everything for this course.
- *
- * Focus on what is most similar to the pseudo code, i.e., the functions
- * preflow, push, and relabel.
- *
- * Some things about C are explained which are useful for everyone
- * for lab 3, and things you most likely want to skip have a warning
- * saying it is only for the curious or really curious.
- * That can safely be ignored since it is not part of this course.
- *
- * Compile and run with: make
- *
- * Enable prints by changing from 1 to 0 at PRINT below.
- *
- * Feel free to ask any questions about it on Discord
- * at #lab0-preflow-push
- *
- * A variable or function declared with static is only visible from
- * within its file so it is a good practice to use in order to avoid
- * conflicts for names which need not be visible from other files.
- *
- */
+// LAB 2:
 
 #include <assert.h>
 #include <ctype.h>
@@ -35,17 +8,10 @@
 #include <string.h>
 #include <stdbool.h> // for using the boolean value.
 #include <pthread.h> // import the lib for using thread in C
-#include <unistd.h>
+#include <unistd.h> // delay
 
 #define PRINT 0 /* enable/disable prints. */
 
-/* the funny do-while next clearly performs one iteration of the loop.
- * if you are really curious about why there is a loop, please check
- * the course book about the C preprocessor where it is explained. it
- * is to avoid bugs and/or syntax errors in case you use the pr in an
- * if-statement without { }.
- *
- */
 
 #if PRINT
 #define pr(...)                       \
@@ -107,7 +73,7 @@ struct graph_t
 	node_t *s;		/* pointer to the source.			*/
 	node_t *t;		/* pointer to the sink.			*/
 	node_t *excess; /* nodes with e > 0 except s,t.	*/
-	bool termination;
+	int active_thread;
 	pthread_mutex_t graph_lock;
 	pthread_cond_t excess_cond;
 };
@@ -139,7 +105,7 @@ static char *progname;
 
 #if PRINT
 
-static int id(graph_t *g, node_t *v)
+static int id(graph_t *g, node_t *v)  // this function can be used when we want to get index of object.
 {
 	/* return the node index for v.
 	 *
@@ -327,7 +293,7 @@ static graph_t *new_graph(FILE *in, int n, int m) // return an adress (pointer) 
 
 	g->n = n;
 	g->m = m;
-	g->termination = false;			   // for termination
+	g->active_thread = 0;			   // for termination
 	g->v = xcalloc(n, sizeof(node_t)); // pointer to an array of node_t struct
 	g->e = xcalloc(m, sizeof(edge_t)); // pointer to an array of edge_t struct
 
@@ -477,22 +443,31 @@ void *worker_function(void *g)
 	node_t *u;
 	edge_t *e;
 	int b;
-
+	bool active_before = false;
 	graph_t *graph = (graph_t *)g;
 	//printf("from thread \n");
 	while (true)
 	{
 
 		pthread_mutex_lock(&graph->graph_lock);
-		while (!predicate(graph) && !graph->termination)
+		while (!predicate(graph))
 		{
-			//printf("from predicate: false \n");
+			if (active_before){
+				graph -> active_thread--;
+				active_before = false;
+			}
+			if (graph->active_thread ==  0){
+				pthread_cond_signal(&graph->excess_cond);
+				pthread_mutex_unlock(&graph->graph_lock);
+				return NULL;
+			}
 			pthread_cond_wait(&graph->excess_cond, &graph->graph_lock); // based on the value of the predicate
 		}
-		if (graph->termination){
-			pthread_mutex_unlock(&graph->graph_lock);
-			break;
+		if(!active_before){
+			graph->active_thread++;
+			active_before = true;
 		}
+		
 		// to processs															   // the thread would release the lock and wait, or else
 		u = leave_excess(graph);
 		pthread_mutex_unlock(&graph->graph_lock);
@@ -564,7 +539,7 @@ int preflow(graph_t *g)
 	list_t *p;
 	int b;
 	int t;
-	t = 5; // nbr of thread
+	t = 9; // nbr of thread
 	pthread_t thread[t];
 
 	s = g->s;
@@ -595,18 +570,7 @@ int preflow(graph_t *g)
 		}
 	}
 	// 	MAIN THREAD MONITORING LOOP
-	while(true){
-		pthread_mutex_lock(&g->graph_lock);
-		bool should_terminate = (g->excess == NULL);
-		if(should_terminate){
-			g -> termination = true; 
-			pthread_cond_broadcast(&g->excess_cond);
-			pthread_mutex_unlock(&g->graph_lock);
-			break;
-		}
-		pthread_mutex_unlock(&g->graph_lock);
-		usleep(50000);
-	}
+	
 
 	for (int i = 0; i < t; i++)
 	{
@@ -628,7 +592,7 @@ static void free_graph(graph_t *g) // this function releases all the memory allo
 
 	for (i = 0; i < g->m; i += 1)
 	{
-		pthread_mutex_destroy(&g->e->edge_lock);
+		pthread_mutex_destroy(&g->e[i].edge_lock);
 	}
 
 	for (i = 0; i < g->n; i += 1)
