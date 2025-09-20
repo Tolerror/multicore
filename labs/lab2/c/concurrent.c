@@ -12,7 +12,7 @@
 // #include "queue.h"
 
 #define PRINT 0 /* enable/disable prints. */
-
+#define NBR_THREADS 9
 
 #if PRINT
 #define pr(...)                       \
@@ -72,7 +72,7 @@ struct edge_t
 	node_t *v; /* the other. 			*/
 	int f;	   /* flow > 0 if from u to v.	*/
 	int c;	   /* capacity.			*/
-	pthread_mutex_t edge_lock;
+	// pthread_mutex_t edge_lock;
 };
 
 struct graph_t
@@ -88,7 +88,18 @@ node_t *s;		/* pointer to the source.			*/
 	int active_thread;
 	pthread_mutex_t graph_lock;
 	pthread_cond_t excess_cond;
+    queue_t** thread_queues;
+    int nbr_threads;
+
 };
+
+typedef struct{
+    void *g;    //graph
+    int start;  //start index of node array
+    int end;    //end index of node array
+    int id; //thread ID
+    // int t;  //number of threads
+}thread_args_t;
 
 
 
@@ -373,7 +384,7 @@ static void connect(node_t *u, node_t *v, int c, edge_t *e)
 	add_edge(v, e); // add the edge to v's adjacency list.
 }
 
-static graph_t *new_graph(FILE *in, int n, int m) // return an adress (pointer) to a graph_t object.
+static graph_t *new_graph(FILE *in, int n, int m, int t) // return an adress (pointer) to a graph_t object.
 {
 	graph_t *g; // pointer to a graph_t struct.
 	node_t *u;	// pointer to a node_t struct.
@@ -387,14 +398,22 @@ static graph_t *new_graph(FILE *in, int n, int m) // return an adress (pointer) 
 
 	g->n = n;
 	g->m = m;
+    g->nbr_threads = t;
 	g->active_thread = 0;			   // for termination
 	g->v = xmalloc(n*sizeof(node_t)); // pointer to an array of node_t struct
 	g->e = xmalloc(m*sizeof(edge_t)); // pointer to an array of edge_t struct
 
-	for (int i = 0; i < n; i++)
-	{
-		pthread_mutex_init(&g->v[i].node_lock, NULL); // init the lock for nodes
+    //node lock init
+	for (int i = 0; i < n; i++){
+		pthread_mutex_init(&g->v[i].node_lock, NULL); 
 	}
+
+    //thread queues init
+    g->thread_queues = xmalloc(t*sizeof(queue_t*));
+
+    for(int i = 0 ; i < t ; i++){
+        init_queue(&g->thread_queues[i]);
+    }
 
 	// for (int i = 0; i < m; i++)
 	// { // init the lock for edges.
@@ -529,7 +548,7 @@ bool predicate(graph_t *g)
 	return false;
 }
 
-void *worker_function(void *g)
+void *worker_function(void *arg)
 {
 	// TODO: the work function to passed into the thread_create
 	list_t *edges;
@@ -538,10 +557,20 @@ void *worker_function(void *g)
 	edge_t *e;
 	int b;
 	bool active_before = false;
-	graph_t *graph = (graph_t *)g;
-	//printf("from thread \n");
-    queue_t* q;
-    init_queue(&q);
+
+    //receiving args
+    thread_args_t* args = (thread_args_t*) arg;
+	graph_t *graph = (graph_t *)args->g;
+    int start = args->start;
+    int end = args->end;
+    int id = args->id;
+    
+    //argument passing test
+	//    int nodesPerThread = (graph->n + t -1) / t;
+	//    int threadID = start / nodesPerThread;
+	// printf("from thread id: %d\t start: %d\t end: %d\t calculated threadID: %d\n", id, start, end, threadID);
+
+
 
 	while (true)
 	{
@@ -611,7 +640,7 @@ void *worker_function(void *g)
 		if (v != NULL)
 		{
 
-			push(g, u, v, e);
+			push(graph, u, v, e);
 
 			pthread_mutex_unlock(&v->node_lock);
 			pthread_mutex_unlock(&u->node_lock);
@@ -619,7 +648,7 @@ void *worker_function(void *g)
 		else
 		{
 			pthread_mutex_lock(&u->node_lock);
-			relabel(g, u);
+			relabel(graph, u);
 			pthread_mutex_unlock(&u->node_lock);
 		}
 	}
@@ -636,7 +665,7 @@ int preflow(graph_t *g)
 	list_t *p;
 	int b;
 	int t;
-	t = 9; // nbr of thread
+	t = g->nbr_threads; // nbr of thread
 	pthread_t thread[t];
 
 	s = g->s;
@@ -658,15 +687,25 @@ int preflow(graph_t *g)
 		push(g, s, other(s, e), e);
 	}
 
-	/* then loop until only s and/or t have excess preflow. */
-	for (int i = 0; i < t; i++)
-	{
-		if (pthread_create(&thread[i], NULL, worker_function, (void *)g) != 0)
+    //delegate work to each thread.
+    int nodesPerThread = (g->n + t - 1) / t;
+    thread_args_t args[t];  //struct with parameters for each thread
+
+	for (int i = 0; i < t; i++){
+
+        int start = i * nodesPerThread;
+        int end = MIN(start + nodesPerThread, g->n);
+
+        args[i].g = g;
+        args[i].start = start;
+        args[i].end = end;
+        args[i].id = i;
+
+		if (pthread_create(&thread[i], NULL, worker_function, &args[i]) != 0)
 		{
 			error("pthread_create failed");
 		}
 	}
-	// 	MAIN THREAD MONITORING LOOP
 	
 
 	for (int i = 0; i < t; i++)
@@ -687,10 +726,18 @@ static void free_graph(graph_t *g) // this function releases all the memory allo
 	list_t *p;					   // allocated memory.
 	list_t *q;
 
-	for (i = 0; i < g->m; i += 1)
-	{
-		pthread_mutex_destroy(&g->e[i].edge_lock);
-	}
+	// for (i = 0; i < g->m; i += 1)
+	// {
+	// 	pthread_mutex_destroy(&g->e[i].edge_lock);
+	// }
+
+    for(i = 0 ; i < g->nbr_threads ; i++){
+        if(g->thread_queues[i]){
+            free_queue(g->thread_queues[i]);
+        }
+    }
+
+    free(g->thread_queues);
 
 	for (i = 0; i < g->n; i += 1)
 	{ // ADD the logic for destroying lock and condtion here.
@@ -729,7 +776,7 @@ int main(int argc, char *argv[])
 	next_int();
 	next_int();
 
-	g = new_graph(in, n, m);
+	g = new_graph(in, n, m, NBR_THREADS);
 
 	fclose(in);
 
