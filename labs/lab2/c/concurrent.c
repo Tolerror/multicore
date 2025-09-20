@@ -388,8 +388,8 @@ static graph_t *new_graph(FILE *in, int n, int m) // return an adress (pointer) 
 	g->n = n;
 	g->m = m;
 	g->active_thread = 0;			   // for termination
-	g->v = xcalloc(n, sizeof(node_t)); // pointer to an array of node_t struct
-	g->e = xcalloc(m, sizeof(edge_t)); // pointer to an array of edge_t struct
+	g->v = xmalloc(n*sizeof(node_t)); // pointer to an array of node_t struct
+	g->e = xmalloc(m*sizeof(edge_t)); // pointer to an array of edge_t struct
 
 	for (int i = 0; i < n; i++)
 	{
