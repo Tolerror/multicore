@@ -25,6 +25,8 @@ struct node_t{
     
 };
 
+node_t* init_node();
+
 void init_queue(queue_t** q);
 
 void enqueue(queue_t* q, node_t* node);

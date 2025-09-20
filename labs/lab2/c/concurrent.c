@@ -9,6 +9,7 @@
 #include <stdbool.h> // for using the boolean value.
 #include <pthread.h> // import the lib for using thread in C
 #include <unistd.h> // delay
+// #include "queue.h"
 
 #define PRINT 0 /* enable/disable prints. */
 
@@ -38,6 +39,17 @@ typedef struct graph_t graph_t;
 typedef struct node_t node_t;
 typedef struct edge_t edge_t;
 typedef struct list_t list_t;
+typedef struct queue_t queue_t;
+
+
+struct queue_t{
+    
+    node_t* head;
+    node_t* tail;
+    pthread_mutex_t h_lock;
+    pthread_mutex_t t_lock;
+
+};
 
 struct list_t
 {
@@ -77,6 +89,9 @@ struct graph_t
 	pthread_mutex_t graph_lock;
 	pthread_cond_t excess_cond;
 };
+
+
+
 
 /* a remark about C arrays. the phrase above 'array of n nodes' is using
  * the word 'array' in a general sense for any language. in C an array
@@ -248,6 +263,34 @@ static void *xcalloc(size_t n, size_t s)
 	return p;
 }
 
+node_t* init_node(){
+
+    node_t* node = (node_t*) malloc(sizeof(node_t)); 
+    if(node == NULL){
+        exit(1);
+    }
+
+    return node;
+}
+
+void init_queue(queue_t** q){
+
+    *q = malloc(sizeof(queue_t));
+
+    if(*q == NULL){
+        exit(1);
+    }
+
+    node_t* n = init_node();
+    n->next = NULL;
+    (*q)->head = (*q)->tail = n;
+    pthread_mutex_init(&(*q)->h_lock, NULL);
+    pthread_mutex_init(&(*q)->t_lock, NULL);
+
+
+}
+
+
 static void add_edge(node_t *u, edge_t *e)
 {
 	list_t *p;
@@ -262,6 +305,57 @@ static void add_edge(node_t *u, edge_t *e)
 	p->edge = e;				 // set the edge pointer of p to e.
 	p->next = u->edge;			 // set the next pointer of p to the first edge of u.
 	u->edge = p;				 //	make p is the new head of u's adjacency list.
+}
+
+
+void enqueue(queue_t* q, node_t* node){
+    node_t* n = init_node();
+
+    //data
+    n->h = node->h;
+    n->e = node->e;
+    n->next = node->next;
+    //data
+
+    n->next = NULL;
+    pthread_mutex_lock(&q->t_lock);
+    q->tail->next = n;
+    q->tail = n;
+    pthread_mutex_unlock(&q->t_lock);
+}
+
+
+bool dequeue(queue_t* q, node_t* node){
+    pthread_mutex_lock(&q->h_lock);
+    node_t* old_head = q->head;
+    node_t* new_head = old_head->next;
+    
+    if(new_head == NULL){
+        pthread_mutex_unlock(&q->h_lock);
+        return false;
+    }
+
+    node->h = new_head->h;
+    node->e = new_head->e;
+    node->next = new_head->next;
+    q->head = new_head; 
+    pthread_mutex_unlock(&q->h_lock);
+    free(old_head);
+    return true;
+}
+
+void free_queue(queue_t* q){
+    node_t* curr = q->head;
+
+    while(curr){
+        node_t* tmp = curr;
+        curr = curr->next;
+        free(tmp);
+    }
+
+    pthread_mutex_destroy(&q->h_lock);
+    pthread_mutex_destroy(&q->t_lock);
+    free(q);
 }
 
 static void connect(node_t *u, node_t *v, int c, edge_t *e)
