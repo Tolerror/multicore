@@ -21,15 +21,8 @@ and measure with:
 where begin and end should have type double.
 
 
-
-# Notes
-
-pthread_cond_wait()
-pthread_mutex_lock()
-pthread_mutex_unlock()
-pthread_mutex_destroy() to free resources
-
-wait in while loops to prevent spurious wake ups but also to check condition again if still true
-
-Can use pthread_barrier_wait() to wait on x number of threads
-pthread_barrier_destroy() to free barrier resources afterwards
+NOTES:
+gcc -o concurrent concurrent.c -g -O3 -pthread
+7.56user 1.02system 0:01.26elapsed 677%CPU (0avgtext+0avgdata 128000maxresident)k
+0inputs+88outputs (0major+34893minor)pagefaults 0swaps
+(with global graph lock + 9 threads + xmalloc)

@@ -82,7 +82,7 @@ struct graph_t
 	int m;			/* number of edges			*/
 	node_t *v;		/* pointer to array of n nodes.		*/
 	edge_t *e;		/* pointer to array of m edges.		*/
-	node_t *s;		/* pointer to the source.			*/
+node_t *s;		/* pointer to the source.			*/
 	node_t *t;		/* pointer to the sink.			*/
 	node_t *excess; /* nodes with e > 0 except s,t.	*/
 	int active_thread;
@@ -396,10 +396,10 @@ static graph_t *new_graph(FILE *in, int n, int m) // return an adress (pointer) 
 		pthread_mutex_init(&g->v[i].node_lock, NULL); // init the lock for nodes
 	}
 
-	for (int i = 0; i < m; i++)
-	{ // init the lock for edges.
-		pthread_mutex_init(&g->e[i].edge_lock, NULL);
-	}
+	// for (int i = 0; i < m; i++)
+	// { // init the lock for edges.
+	// 	pthread_mutex_init(&g->e[i].edge_lock, NULL);
+	// }
 
 	g->s = &g->v[0];						  // g->s: is a pointer that point to the address of first v element
 	g->t = &g->v[n - 1];					  // &g->v[0] the address of the first node
@@ -540,6 +540,9 @@ void *worker_function(void *g)
 	bool active_before = false;
 	graph_t *graph = (graph_t *)g;
 	//printf("from thread \n");
+    queue_t* q;
+    init_queue(&q);
+
 	while (true)
 	{
 
