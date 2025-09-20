@@ -20,3 +20,9 @@ and measure with:
 
 where begin and end should have type double.
 
+
+NOTES:
+gcc -o concurrent concurrent.c -g -O3 -pthread
+7.56user 1.02system 0:01.26elapsed 677%CPU (0avgtext+0avgdata 128000maxresident)k
+0inputs+88outputs (0major+34893minor)pagefaults 0swaps
+(with global graph lock + 9 threads + xmalloc)
