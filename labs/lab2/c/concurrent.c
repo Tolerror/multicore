@@ -12,7 +12,7 @@
 // #include "queue.h"
 
 #define PRINT 0 /* enable/disable prints. */
-#define NBR_THREADS 9
+#define NBR_THREADS 15
 
 #if PRINT
 #define pr(...)                       \
@@ -73,6 +73,7 @@ struct node_t
 	list_t *edge; /* adjacency list.		*/
 	node_t *next; /* with excess preflow.		*/
 	pthread_mutex_t node_lock;
+    int id;
     bool queued;
 };
 
@@ -313,7 +314,7 @@ int get_thread_for_node(graph_t* g, node_t* node){
     }
 }
 
-void enqueue_node_index(thread_queue_t* q, int node_index){
+void enqueue_node_index(thread_queue_t* q, int node_index, node_t* v){
     queue_item_t* item = xmalloc(sizeof(queue_item_t));
     item->node_index = node_index;
     item->next = NULL;
@@ -321,10 +322,11 @@ void enqueue_node_index(thread_queue_t* q, int node_index){
     pthread_mutex_lock(&q->t_lock);     //t_lock originally
     q->tail->next = item;
     q->tail = item;
+    v->queued = true;
     pthread_mutex_unlock(&q->t_lock);   //t_lock originally
 }
 
-int dequeue_node_index(thread_queue_t* q){
+int dequeue_node_index(thread_queue_t* q, graph_t* g){
     pthread_mutex_lock(&q->h_lock);
 
     queue_item_t* old_head = q->head;
@@ -335,12 +337,13 @@ int dequeue_node_index(thread_queue_t* q){
         return -1;  //empty
     }
 
-    int nodex_index = new_head->node_index;
+    int node_index = new_head->node_index;
     q->head = new_head;
+    g->v[node_index].queued = false;
     pthread_mutex_unlock(&q->h_lock);
 
     free(old_head);
-    return nodex_index;
+    return node_index;
 }
 
 bool queue_is_empty(thread_queue_t* q){
@@ -360,10 +363,9 @@ bool any_thread_has_work(graph_t* g){
 }
 
 void enter_excess_queue(graph_t* g, node_t* v){
-    if(v != g->t && v != g->s){
+    if(v != g->t && v != g->s && !v->queued){
         int target_thread = get_thread_for_node(g, v);
-        int node_index = v - g->v;
-        enqueue_node_index(g->thread_queues[target_thread], node_index);
+        enqueue_node_index(g->thread_queues[target_thread], v->id, v);
         pthread_cond_broadcast(&g->excess_cond);
     }
 }
@@ -454,7 +456,7 @@ void *work(void *arg){
 
         pthread_mutex_unlock(&graph->active_thread_lock);
 
-        int node_index = dequeue_node_index(graph->thread_queues[id]); //dequeue from now queue
+        int node_index = dequeue_node_index(graph->thread_queues[id], graph); //dequeue from now queue
         u = &graph->v[node_index];
         edges = u->edge;
         v = NULL;
@@ -581,6 +583,7 @@ static graph_t *new_graph(FILE *in, int n, int m, int t) // return an adress (po
         g->v[i].edge = NULL;
         g->v[i].next = NULL;
         g->v[i].queued = false;
+        g->v[i].id = i;
         pthread_mutex_init(&g->v[i].node_lock, NULL); 
     }
 
