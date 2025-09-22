@@ -74,6 +74,7 @@ struct node_t
 	node_t *next; /* with excess preflow.		*/
 	pthread_mutex_t node_lock;
     int id;
+    int thread_id;
     bool queued;
 };
 
@@ -353,35 +354,15 @@ bool queue_is_empty(thread_queue_t* q){
     return empty;
 }
 
-int load_balance(graph_t* g, int threadID){
-
-    for(int i = 1 ; i < g->nbr_threads ; i++){
-        int target_thread = (threadID + i) % g->nbr_threads;
-
-        if(!queue_is_empty(g->thread_queues[target_thread])){
-            int retrieved_node = dequeue_node_index(g->thread_queues[target_thread], g);
-            if(retrieved_node != -1){
-                return retrieved_node;
-            }
-        }
-    }
-    return -1;
-}
-
 void enter_excess_queue(graph_t* g, node_t* v){
     if(v != g->t && v != g->s && !v->queued){
-        int target_thread = get_thread_for_node(g, v);
+        int target_thread = v->thread_id;
         enqueue_node_index(g->thread_queues[target_thread], v->id, v);
         pthread_cond_signal(&g->excess_cond);
     }
 }
 
 
-
-bool predicate(thread_queue_t* q)
-{
-	return !queue_is_empty(q);
-}
 
 static void push(graph_t* g, node_t* u, node_t* v, edge_t* e){
     int d;
@@ -420,6 +401,22 @@ static void relabel(graph_t* g, node_t* u){
     enter_excess_queue(g, u);
 }
 
+void increment_active_threads(graph_t* g){
+    pthread_mutex_lock(&g->active_thread_lock);
+    g->active_thread++;
+    pthread_mutex_unlock(&g->active_thread_lock);
+}
+
+
+void decrement_active_threads(graph_t* g){
+    pthread_mutex_lock(&g->active_thread_lock);
+    g->active_thread--;
+    pthread_mutex_unlock(&g->active_thread_lock);
+}
+
+bool terminate_req(graph_t* g){
+    return g->s->e + g->t->e != 0;
+}
 
 void *work(void *arg){
     list_t* edges;
@@ -439,13 +436,35 @@ void *work(void *arg){
 
         pthread_mutex_lock(&graph->active_thread_lock);
 
-        while(!predicate(graph->thread_queues[id])){
+        while(queue_is_empty(graph->thread_queues[id])){
             
             if(active_before){
                 graph->active_thread--;
                 // pthread_mutex_unlock(&graph->active_thread_lock);
                 active_before = false;
             }
+
+            bool work_fetched = false;
+            pthread_mutex_unlock(&graph->active_thread_lock);
+
+            for(int i = 0 ; i < graph->nbr_threads && !work_fetched ; i++){ 
+                if(i != id && !queue_is_empty(graph->thread_queues[i])){    //loop through all thread queues to find work
+                    
+                    int fetched_node = dequeue_node_index(graph->thread_queues[i], graph);
+                    if(fetched_node != -1){ //if queue wasn't empty
+                        enqueue_node_index(graph->thread_queues[id], fetched_node, &graph->v[fetched_node]); //push onto own threads work queue
+                        work_fetched = true;
+                        break;
+                    }
+                }
+            }
+
+            pthread_mutex_lock(&graph->active_thread_lock);
+
+            if(work_fetched){   //break out of waiting if we found a node
+                break;
+            }
+
 
             if(graph->active_thread == 0){
                 bool has_work = false;
@@ -455,7 +474,7 @@ void *work(void *arg){
                     }
                 }
 
-                if(!has_work){
+                if(!has_work && terminate_req(graph)){
                     pthread_cond_broadcast(&graph->excess_cond);
                     pthread_mutex_unlock(&graph->active_thread_lock);
                     return NULL;
@@ -472,7 +491,6 @@ void *work(void *arg){
         pthread_mutex_unlock(&graph->active_thread_lock);
 
         int node_index = dequeue_node_index(graph->thread_queues[id], graph); //dequeue from now queue
-
         if(node_index == -1){
             continue;
         }
@@ -603,6 +621,7 @@ static graph_t *new_graph(FILE *in, int n, int m, int t) // return an adress (po
         g->v[i].next = NULL;
         g->v[i].queued = false;
         g->v[i].id = i;
+        g->v[i].thread_id = get_thread_for_node(g, &g->v[i]);
         pthread_mutex_init(&g->v[i].node_lock, NULL); 
     }
 
