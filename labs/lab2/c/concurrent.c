@@ -454,7 +454,7 @@ void *work(void *arg){
     while(true){
 
         // pthread_mutex_lock(&graph->active_thread_lock);
-        pthread_mutex_lock(&graph->thread_queues[id]->wait_queue_lock);
+        pthread_mutex_lock(&graph->thread_queues[id]->queue_wait_lock);
         while(graph->thread_queues[id]->head->next == NULL){
             
             if(active_before){
@@ -496,16 +496,16 @@ void *work(void *arg){
 
                 // if(!has_work && terminate_req(graph)){
                     pthread_cond_broadcast(&graph->excess_cond);
-                    pthread_mutex_unlock(&graph->thread_queues[id]->wait_queue_lock);
+                        pthread_mutex_unlock(&graph->thread_queues[id]->queue_wait_lock);
                     pthread_mutex_unlock(&graph->active_thread_lock);
                     return NULL;
                 // }
             }
             pthread_mutex_unlock(&graph->active_thread_lock);
-            pthread_cond_wait(&graph->excess_cond, &graph->thread_queues[id]->wait_queue_lock);
+            pthread_cond_wait(&graph->excess_cond, &graph->thread_queues[id]->queue_wait_lock);
         }
 
-        pthread_mutex_unlock(&graph->thread_queues[id]->wait_queue_lock);
+        pthread_mutex_unlock(&graph->thread_queues[id]->queue_wait_lock);
 
         if(!active_before){
             // graph->active_thread++;
