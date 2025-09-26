@@ -58,7 +58,7 @@ struct thread_queue_t{
     queue_item_t* tail;
     pthread_mutex_t t_lock;
     pthread_mutex_t h_lock;
-    pthread_mutex_t wait_queue_lock;
+    pthread_mutex_t queue_wait_lock;
 };
 
 struct list_t
@@ -102,7 +102,7 @@ struct graph_t
 	pthread_mutex_t graph_lock;
     pthread_mutex_t active_thread_lock;
 	pthread_cond_t excess_cond;
-    struct thread_queue_t** thread_queues;
+    thread_queue_t** thread_queues;
     int nbr_threads;
 };
 
@@ -301,7 +301,7 @@ void init_thread_queue(thread_queue_t** q){
     (*q)->head = (*q)->tail = tmp;
     pthread_mutex_init(&(*q)->h_lock, NULL);
     pthread_mutex_init(&(*q)->t_lock, NULL);
-    pthread_mutex_init(&(*q)->wait_queue_lock, NULL);
+    pthread_mutex_init(&(*q)->queue_wait_lock, NULL);
 }
 
 
@@ -325,25 +325,28 @@ void enqueue_node_index(thread_queue_t* q, int node_index, node_t* v){
     pthread_mutex_lock(&q->t_lock);     //t_lock originally
     q->tail->next = item;
     q->tail = item;
-    v->queued = true;
+    // v->queued = true;
+
     pthread_mutex_unlock(&q->t_lock);   //t_lock originally
 }
 
 int dequeue_node_index(thread_queue_t* q, graph_t* g){
-    pthread_mutex_lock(&q->h_lock);
+    pthread_mutex_lock(&q->t_lock); //h_lock
 
     queue_item_t* old_head = q->head;
     queue_item_t* new_head = old_head->next;
 
     if(new_head == NULL){
-        pthread_mutex_unlock(&q->h_lock);
+        pthread_mutex_unlock(&q->t_lock); //h_lock
         return -1;  //empty
     }
 
     int node_index = new_head->node_index;
 
     q->head = new_head;
-    pthread_mutex_unlock(&q->h_lock);
+    // g->v[node_index].queued = false;
+
+    pthread_mutex_unlock(&q->t_lock); //h_lock
 
     pthread_mutex_lock(&g->v[node_index].node_lock);
     g->v[node_index].queued = false;    //irrelevant race condition
@@ -362,7 +365,7 @@ bool queue_is_empty(thread_queue_t* q){
 }
 
 void enter_excess_queue(graph_t* g, node_t* v){
-    if(v != g->t && v != g->s && !v->queued){
+    if(v != g->t && v != g->s){
         int target_thread = v->thread_id;
         enqueue_node_index(g->thread_queues[target_thread], v->id, v);
         pthread_cond_signal(&g->excess_cond);
@@ -421,9 +424,14 @@ void decrement_active_threads(graph_t* g){
     pthread_mutex_unlock(&g->active_thread_lock);
 }
 
-// bool no_active_threads(graph_t* g){
-//
-// }
+bool no_active_threads(graph_t* g){
+    pthread_mutex_lock(&g->active_thread_lock);
+    bool result = g->active_thread == 0;
+    pthread_mutex_unlock(&g->active_thread_lock);
+    return result;
+}
+
+
 
 bool terminate_req(graph_t* g){
     return g->s->e + g->t->e != 0;
@@ -530,22 +538,21 @@ void *work(void *arg){
             }
 
             
-            if(u < v){
-                pthread_mutex_lock(&u->node_lock);
-                pthread_mutex_lock(&v->node_lock);
-            }else{
-                pthread_mutex_lock(&v->node_lock);
-                pthread_mutex_lock(&u->node_lock);
-            }
+                if(u < v){
+                    pthread_mutex_lock(&u->node_lock);
+                    pthread_mutex_lock(&v->node_lock);
+                }else{
+                    pthread_mutex_lock(&v->node_lock);
+                    pthread_mutex_lock(&u->node_lock);
+                }
 
             if(u->h > v->h && direction*e->f < e->c){
                 candidate_edge = e;
                 break;
-
-            }else{
-                pthread_mutex_unlock(&v->node_lock);
-                pthread_mutex_unlock(&u->node_lock);
-                v = NULL;
+                }else{
+                    pthread_mutex_unlock(&v->node_lock);        //maybe comment out
+                pthread_mutex_unlock(&u->node_lock);    //maybe comment out
+                v = NULL;                    
             }
         }
         
@@ -554,13 +561,15 @@ void *work(void *arg){
             pthread_mutex_unlock(&v->node_lock);
             pthread_mutex_unlock(&u->node_lock);
             pthread_cond_broadcast(&graph->excess_cond);
-
         }else{
             pthread_mutex_lock(&u->node_lock);
             relabel(graph, u);
             pthread_mutex_unlock(&u->node_lock);
             pthread_cond_broadcast(&graph->excess_cond);
         }
+
+
+
     }
 
     return NULL;
@@ -595,6 +604,7 @@ void free_queue(thread_queue_t* q){
 
     pthread_mutex_destroy(&q->h_lock);
     pthread_mutex_destroy(&q->t_lock);
+    pthread_mutex_destroy(&q->queue_wait_lock);
     free(q);
 }
 
