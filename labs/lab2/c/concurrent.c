@@ -58,6 +58,7 @@ struct thread_queue_t{
     queue_item_t* tail;
     pthread_mutex_t t_lock;
     pthread_mutex_t h_lock;
+    pthread_mutex_t wait_queue_lock;
 };
 
 struct list_t
@@ -300,6 +301,7 @@ void init_thread_queue(thread_queue_t** q){
     (*q)->head = (*q)->tail = tmp;
     pthread_mutex_init(&(*q)->h_lock, NULL);
     pthread_mutex_init(&(*q)->t_lock, NULL);
+    pthread_mutex_init(&(*q)->wait_queue_lock, NULL);
 }
 
 
@@ -339,18 +341,23 @@ int dequeue_node_index(thread_queue_t* q, graph_t* g){
     }
 
     int node_index = new_head->node_index;
+
     q->head = new_head;
-    g->v[node_index].queued = false;
     pthread_mutex_unlock(&q->h_lock);
+
+    pthread_mutex_lock(&g->v[node_index].node_lock);
+    g->v[node_index].queued = false;    //irrelevant race condition
+    pthread_mutex_unlock(&g->v[node_index].node_lock);
+    // pthread_mutex_unlock(&q->h_lock);
 
     free(old_head);
     return node_index;
 }
 
 bool queue_is_empty(thread_queue_t* q){
-    pthread_mutex_lock(&q->h_lock);
+    pthread_mutex_lock(&q->t_lock);
     bool empty = (q->head->next == NULL);
-    pthread_mutex_unlock(&q->h_lock);
+    pthread_mutex_unlock(&q->t_lock);
     return empty;
 }
 
@@ -414,6 +421,10 @@ void decrement_active_threads(graph_t* g){
     pthread_mutex_unlock(&g->active_thread_lock);
 }
 
+// bool no_active_threads(graph_t* g){
+//
+// }
+
 bool terminate_req(graph_t* g){
     return g->s->e + g->t->e != 0;
 }
@@ -423,7 +434,7 @@ void *work(void *arg){
     node_t* v;
     node_t* u;
     edge_t* e;
-    int b;
+    int direction;
     bool active_before = false;
 
     thread_args_t* args = (thread_args_t*) arg;
@@ -434,21 +445,22 @@ void *work(void *arg){
 
     while(true){
 
-        pthread_mutex_lock(&graph->active_thread_lock);
-
-        while(queue_is_empty(graph->thread_queues[id])){
+        // pthread_mutex_lock(&graph->active_thread_lock);
+        pthread_mutex_lock(&graph->thread_queues[id]->wait_queue_lock);
+        while(graph->thread_queues[id]->head->next == NULL){
             
             if(active_before){
-                graph->active_thread--;
+                decrement_active_threads(graph);
+                // graph->active_thread--;
                 // pthread_mutex_unlock(&graph->active_thread_lock);
                 active_before = false;
             }
 
             bool work_fetched = false;
-            pthread_mutex_unlock(&graph->active_thread_lock);
+            // pthread_mutex_unlock(&graph->thread_queues[id]->wait_queue_lock);
 
             for(int i = 0 ; i < graph->nbr_threads && !work_fetched ; i++){ 
-                if(i != id && !queue_is_empty(graph->thread_queues[i])){    //loop through all thread queues to find work
+                if(i != id){    //loop through all thread queues to find work
                     
                     int fetched_node = dequeue_node_index(graph->thread_queues[i], graph);
                     if(fetched_node != -1){ //if queue wasn't empty
@@ -459,36 +471,41 @@ void *work(void *arg){
                 }
             }
 
-            pthread_mutex_lock(&graph->active_thread_lock);
+            // pthread_mutex_lock(&graph->thread_queues[id]->wait_queue_lock);
 
             if(work_fetched){   //break out of waiting if we found a node
                 break;
             }
 
+            pthread_mutex_lock(&graph->active_thread_lock);
+            if(graph->active_thread == 0 && terminate_req(graph)){
+                // bool has_work = false;
+                // for(int i = 0; i < graph->nbr_threads && !has_work; i++){
+                //     if(!queue_is_empty(graph->thread_queues[i])){
+                //         has_work = true;
+                //     }
+                // }
 
-            if(graph->active_thread == 0){
-                bool has_work = false;
-                for(int i = 0; i < graph->nbr_threads && !has_work; i++){
-                    if(!queue_is_empty(graph->thread_queues[i])){
-                        has_work = true;
-                    }
-                }
-
-                if(!has_work && terminate_req(graph)){
+                // if(!has_work && terminate_req(graph)){
                     pthread_cond_broadcast(&graph->excess_cond);
+                    pthread_mutex_unlock(&graph->thread_queues[id]->wait_queue_lock);
                     pthread_mutex_unlock(&graph->active_thread_lock);
                     return NULL;
-                }
+                // }
             }
-            pthread_cond_wait(&graph->excess_cond, &graph->active_thread_lock);
+            pthread_mutex_unlock(&graph->active_thread_lock);
+            pthread_cond_wait(&graph->excess_cond, &graph->thread_queues[id]->wait_queue_lock);
         }
 
+        pthread_mutex_unlock(&graph->thread_queues[id]->wait_queue_lock);
+
         if(!active_before){
-            graph->active_thread++;
+            // graph->active_thread++;
+            increment_active_threads(graph);
             active_before = true;
         }
 
-        pthread_mutex_unlock(&graph->active_thread_lock);
+        // pthread_mutex_unlock(&graph->active_thread_lock);
 
         int node_index = dequeue_node_index(graph->thread_queues[id], graph); //dequeue from now queue
         if(node_index == -1){
@@ -498,17 +515,18 @@ void *work(void *arg){
         u = &graph->v[node_index];
         edges = u->edge;
         v = NULL;
+        edge_t* candidate_edge = NULL;
 
-        while(edges != NULL){
+        while(edges != NULL && candidate_edge == NULL){ //avoid edge race condition, double check within locks
             e = edges->edge;
             edges = edges->next;
 
             if(u == e->u){
                 v = e->v;
-                b = 1;
+                direction = 1;
             }else{
                 v = e->u;
-                b = -1;
+                direction = -1;
             }
 
             
@@ -520,7 +538,8 @@ void *work(void *arg){
                 pthread_mutex_lock(&u->node_lock);
             }
 
-            if(u->h > v->h && b*e->f < e->c){
+            if(u->h > v->h && direction*e->f < e->c){
+                candidate_edge = e;
                 break;
 
             }else{
@@ -530,8 +549,8 @@ void *work(void *arg){
             }
         }
         
-        if(v != NULL){
-            push(graph, u, v, e);
+        if(candidate_edge != NULL){
+            push(graph, u, v, candidate_edge);
             pthread_mutex_unlock(&v->node_lock);
             pthread_mutex_unlock(&u->node_lock);
             pthread_cond_broadcast(&graph->excess_cond);
