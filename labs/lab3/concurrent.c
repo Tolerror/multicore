@@ -411,7 +411,7 @@ int barrier_preflow(graph_t* g){
     s->h = g->n;
 
 
-    list_t* p = s->edge;    //source node edge list
+    list_t* p = s->edge;    //inital source push
     while(p != NULL){
         edge_t* e = p->edge;
         node_t* v = (s == e->u) ? e->v : e->u;
