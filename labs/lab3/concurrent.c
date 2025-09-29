@@ -61,6 +61,7 @@ typedef struct{
     operation_t* operations;
     int op_count;
     int capacity;
+    int total_worked;
 
 } thread_operations_t;
 
@@ -76,11 +77,11 @@ struct node_t
 	int h;		  /* height.			*/
 	int e;		  /* excess flow.			*/
 	list_t *edge; /* adjacency list.		*/
-	node_t *next; /* with excess preflow.		*/
-	pthread_mutex_t node_lock;
-    int id;
+	// node_t *next; /* with excess preflow.		*/
+	// pthread_mutex_t node_lock;
+    // int id;
     int thread_id;
-    bool queued;
+    // bool queued;
 };
 
 struct edge_t
@@ -282,6 +283,7 @@ void init_thread_operations(thread_operations_t* ops, int capacity){
     ops->operations = xmalloc(capacity* sizeof(operation_t));
     ops->op_count = 0;
     ops->capacity = capacity;
+    ops->total_worked = 0;
 }
 
 void add_operation(thread_operations_t* ops, node_t* u, node_t* v, edge_t* e, int flow, bool relabel){
@@ -311,7 +313,7 @@ void prep_phase(graph_t* g, int thread_id, int start_node, int end_node){
         if(u->e <= 0 || u == g->s || u == g->t) continue;   //skip this node
 
         list_t* edges = u->edge;
-        bool found_push = 0;
+        bool found_push = false;
 
         while(edges && !found_push){
             edge_t* e = edges->edge;
@@ -324,6 +326,9 @@ void prep_phase(graph_t* g, int thread_id, int start_node, int end_node){
                     add_operation(thread_ops, u, v, e, flow, false);
                     g->has_work[thread_id] = true;
                     found_push = true;
+
+                    //update thread node worked count
+                   g->thread_ops[thread_id].total_worked++;
                 }
             }
 
@@ -402,6 +407,7 @@ void* barrier_worker(void* arg){
 
         pthread_barrier_wait(&g->phase_barrier);
     }
+    pr("Thread [%d]: worked on %d nodes\n", thread_id, g->thread_ops[thread_id].total_worked);
     return NULL;
 }
 
@@ -460,7 +466,8 @@ int barrier_preflow(graph_t* g){
         }
     }
 
-    //stats viewing
+    //maybe view stats here
+    
     
     for(int i = 0 ; i < t ; i++){
         if(pthread_join(threads[i], NULL) != 0){
@@ -544,8 +551,8 @@ static graph_t *new_graph(FILE *in, int n, int m, int t) // return an adress (po
         g->v[i].h = 0;
         g->v[i].e = 0;
         g->v[i].edge = NULL;
-        g->v[i].next = NULL;
-        g->v[i].id = i;
+        // g->v[i].next = NULL;
+        // g->v[i].id = i;
     }
 
 
