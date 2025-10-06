@@ -1,0 +1,56 @@
+concurrent (barrier) & 15 threads:
+  65.85%  concurrent  concurrent            [.] prep_phase
+  25.87%  concurrent  concurrent            [.] main
+   1.91%  concurrent  libc.so.6             [.] cfree@GLIBC_2.2.5
+   1.52%  concurrent  libc.so.6             [.] _int_malloc
+   1.42%  concurrent  libc.so.6             [.] _IO_getc
+   0.82%  concurrent  libc.so.6             [.] _int_free_chunk
+   0.46%  concurrent  libc.so.6             [.] malloc
+   0.42%  concurrent  [unknown]             [k] 0xffffffffa1601280
+   0.20%  concurrent  libc.so.6             [.] __libc_malloc2
+   0.17%  concurrent  concurrent            [.] getc@plt
+   0.09%  concurrent  concurrent            [.] action_phase.part.0
+   0.06%  concurrent  libc.so.6             [.] alloc_perturb
+   0.06%  concurrent  [unknown]             [k] 0xffffffffa28a0cc2
+   0.05%  concurrent  [unknown]             [k] 0xffffffffa1601284
+   0.04%  concurrent  libc.so.6             [.] pthread_barrier_wait@@GLIBC_2.34
+   0.03%  concurrent  [unknown]             [k] 0xffffffffa28a47c4
+   0.03%  concurrent  [unknown]             [k] 0xffffffffa16015f0
+   0.03%  concurrent  [unknown]             [k] 0xffffffffa1704104
+   0.03%  concurrent  [unknown]             [k] 0xffffffffa28a0cac
+   0.02%  concurrent  concurrent            [.] malloc@plt
+   0.02%  concurrent  [unknown]             [k] 0xffffffffa1601cf2
+   0.02%  concurrent  [unknown]             [k] 0xffffffffa1601d00
+   0.02%  concurrent  [unknown]             [k] 0xffffffffa1c29da8
+   0.02%  concurrent  [unknown]             [k] 0xffffffffa28a4714
+   0.02%  concurrent  [unknown]             [k] 0xffffffffa28a4757
+   0.02%  concurrent  [unknown]             [k] 0xffffffffa1600005
+
+preflow (sequential):
+  60.84%  preflow  preflow               [.] preflow
+  29.84%  preflow  preflow               [.] main
+   2.38%  preflow  libc.so.6             [.] cfree@GLIBC_2.2.5
+   2.26%  preflow  libc.so.6             [.] _int_malloc
+   1.92%  preflow  libc.so.6             [.] _IO_getc
+   0.65%  preflow  libc.so.6             [.] malloc
+   0.65%  preflow  libc.so.6             [.] _int_free_chunk
+   0.26%  preflow  [unknown]             [k] 0xffffffffa1601280
+   0.26%  preflow  libc.so.6             [.] __libc_malloc2
+   0.18%  preflow  preflow               [.] getc@plt
+   0.08%  preflow  libc.so.6             [.] alloc_perturb
+   0.04%  preflow  libc.so.6             [.] __memset_avx2_unaligned_erms
+   0.03%  preflow  [unknown]             [k] 0xffffffffa1601cf2
+   0.02%  preflow  [unknown]             [k] 0xffffffffa1c23723
+   0.02%  preflow  [unknown]             [k] 0xffffffffa1601284
+   0.02%  preflow  [unknown]             [k] 0xffffffffa1601cc0
+   0.02%  preflow  [unknown]             [k] 0xffffffffa192b096
+   0.01%  preflow  libc.so.6             [.] __uflow
+   0.01%  preflow  preflow               [.] free@plt
+   0.01%  preflow  preflow               [.] malloc@plt
+   0.01%  preflow  [unknown]             [k] 0xffffffffa1600005
+   0.01%  preflow  [unknown]             [k] 0xffffffffa1600084
+   0.01%  preflow  [unknown]             [k] 0xffffffffa1601d00
+   0.01%  preflow  [unknown]             [k] 0xffffffffa192aec4
+   0.01%  preflow  [unknown]             [k] 0xffffffffa1c29da8
+   0.01%  preflow  [unknown]             [k] 0xffffffffa1c2ae51
+
