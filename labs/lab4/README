@@ -1,1 +1,3 @@
 For C, continue with the code from Lab 3
+Maybe change lab 2 to retain its lock solution, altough have a barrier separating a prep phase from an action phase. 
+So the prep phase has locks on nodes to prep such that nodes cannot be queried for action several times in one iteration.
