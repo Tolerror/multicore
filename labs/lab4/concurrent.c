@@ -12,7 +12,7 @@
 #include <stdatomic.h>
 // #include "queue.h"
 
-#define PRINT 1 /* enable/disable prints. */
+#define PRINT 0 /* enable/disable prints. */
 #define NBR_THREADS 15
 
 #if PRINT
@@ -82,7 +82,7 @@ struct node_t
 	// pthread_mutex_t node_lock;
     // int id;
     int thread_id;
-    bool queued;
+    atomic_bool queued;
     pthread_mutex_t node_lock;
 };
 
@@ -90,8 +90,8 @@ struct edge_t
 {
 	node_t *u; /* one of the two nodes.	*/
 	node_t *v; /* the other. 			*/
-	int f;	   /* flow > 0 if from u to v.	*/
-	int c;	   /* capacity.			*/
+	atomic_int f;	   /* flow > 0 if from u to v.	*/
+	atomic_int c;	   /* capacity.			*/
 	// pthread_mutex_t edge_lock;
 };
 
@@ -312,7 +312,7 @@ void prep_phase(graph_t* g, int thread_id, int start_node, int end_node){
     for(int i = start_node ; i < end_node ; i++){
         node_t* u = &g->v[i];
 
-        if(u->e <= 0 || u == g->s || u == g->t){
+        if(atomic_load(&u->e) <= 0 || u == g->s || u == g->t){
             continue;
         }    //skip this node
 
@@ -323,22 +323,44 @@ void prep_phase(graph_t* g, int thread_id, int start_node, int end_node){
             edge_t* e = edges->edge;
             node_t* v = (u == e->u) ? e->v : e->u;
             
-            if(u < v){
-                pthread_mutex_lock(&u->node_lock);
-                pthread_mutex_lock(&v->node_lock);
-            }else{
-                pthread_mutex_lock(&v->node_lock);
-                pthread_mutex_lock(&u->node_lock);
-            }
+            // if(u < v){
+            //     pthread_mutex_lock(&u->node_lock);
+            //     pthread_mutex_lock(&v->node_lock);
+            // }else{
+            //     pthread_mutex_lock(&v->node_lock);
+            //     pthread_mutex_lock(&u->node_lock);
+            // }
+            //
+            // if(u->queued || v->queued){
+            //     pthread_mutex_unlock(&v->node_lock);
+            //     pthread_mutex_unlock(&u->node_lock);
+            //     edges = edges->next;
+            //     continue;
+            // }
+            //
 
-            if(u->queued || v->queued){
-                pthread_mutex_unlock(&v->node_lock);
-                pthread_mutex_unlock(&u->node_lock);
+            bool expected_u = false;
+            bool expected_v = false;
+
+            //try to claim u node
+            if(!atomic_compare_exchange_strong(&u->queued, &expected_u, true)){
                 edges = edges->next;
                 continue;
             }
 
+            //try to claim v node
+            if(!atomic_compare_exchange_strong(&v->queued, &expected_v, true)){
+
+                atomic_store(&u->queued, false);
+                edges = edges->next;
+                continue;
+            }
+
+
             int direction = (u == e->u) ? 1 : -1;
+            int u_h = atomic_load(&u->h);
+            int v_h = atomic_load(&v->h);
+            int u_e = atomic_load(&u->e);
 
             if(u->h > v->h && (direction * e->f) < e->c){
                 int flow = MIN(u->e, e->c - direction*e->f);
@@ -351,15 +373,14 @@ void prep_phase(graph_t* g, int thread_id, int start_node, int end_node){
 
                     //update thread node worked count
                    g->thread_ops[thread_id].total_worked++;
-                    pthread_mutex_unlock(&v->node_lock);
-                    pthread_mutex_unlock(&u->node_lock);
+
                 }else{
-                    pthread_mutex_unlock(&v->node_lock);
-                    pthread_mutex_unlock(&u->node_lock);
+                    atomic_store(&u->queued, false);
+                    atomic_store(&v->queued, false);
                 }
             }else{
-                pthread_mutex_unlock(&v->node_lock);
-                pthread_mutex_unlock(&u->node_lock);
+                atomic_store(&u->queued, false);
+                atomic_store(&v->queued, false);
             }
 
             edges = edges->next;
@@ -367,15 +388,14 @@ void prep_phase(graph_t* g, int thread_id, int start_node, int end_node){
         }
 
         //if no push was found and the node has excess ->relabel
-        if(!found_push && u->e > 0){
-            pthread_mutex_lock(&u->node_lock);
-            if(!u->queued){
+        if(!found_push && atomic_load(&u->e) > 0){
+            bool expected = false;
+
+            if(atomic_compare_exchange_strong(&u->queued, &expected, true)){
                 add_operation(thread_ops, u, NULL, NULL, 0, true);
-                u->queued = true;
                 g->has_work[thread_id] = true;
 
             }
-            pthread_mutex_unlock(&u->node_lock);
         }
     }
 }
@@ -395,8 +415,8 @@ void action_phase(graph_t* g, int thread_id){
                 operation_t* op = &ops->operations[i];
 
                 if(op->should_relabel){
-                    op->u->h += 1;
-                    op->u->queued = false;
+                    atomic_fetch_add(&op->u->h, 1);
+                    atomic_store(&op->u->queued, false);
                 }else{
 
                     node_t* u = op->u;
@@ -409,14 +429,15 @@ void action_phase(graph_t* g, int thread_id){
                     }else{
                         e->f -= d;
                     }
-                    u->e -= d;
-                    v->e += d;
+                    atomic_fetch_sub(&u->e, d);
+                    atomic_fetch_add(&v->e, d);
 
                     assert(d >= 0);
-                    assert(u->e >= 0);
+                    assert(atomic_load(&u->e) >= 0);
                     assert(abs(e->f) <= e->c);
-                    u->queued = false;
-                    v->queued = false;
+
+                    atomic_store(&u->queued, false);
+                    atomic_store(&v->queued, false);
                 }
             }
         }
@@ -587,10 +608,11 @@ static graph_t *new_graph(FILE *in, int n, int m, int t) // return an adress (po
 
     //node lock init
     for (int i = 0; i < n; i++){
-        g->v[i].h = 0;
-        g->v[i].e = 0;
+        atomic_init(&g->v[i].h, 0);
+        atomic_init(&g->v[i].e, 0);
         g->v[i].edge = NULL;
-        if(pthread_mutex_init(&g->v[i].node_lock, NULL) != 0) printf("mutex could not be initialized!");
+        atomic_init(&g->v[i].queued, false);
+        // if(pthread_mutex_init(&g->v[i].node_lock, NULL) != 0) printf("mutex could not be initialized!");
         // g->v[i].next = NULL;
         // g->v[i].id = i;
     }
@@ -632,7 +654,6 @@ static void free_graph(graph_t *g) // this function releases all the memory allo
 	list_t *q;
 
 	for (i = 0; i < g->n; i += 1){ 
-        pthread_mutex_destroy(&g->v[i].node_lock);
 		p = g->v[i].edge;
 		while (p != NULL)
 		{
