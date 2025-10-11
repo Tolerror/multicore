@@ -83,7 +83,6 @@ struct node_t
     // int id;
     int thread_id;
     atomic_bool queued;
-    pthread_mutex_t node_lock;
 };
 
 struct edge_t
@@ -312,7 +311,7 @@ void prep_phase(graph_t* g, int thread_id, int start_node, int end_node){
     for(int i = start_node ; i < end_node ; i++){
         node_t* u = &g->v[i];
 
-        if(atomic_load(&u->e) <= 0 || u == g->s || u == g->t){
+        if(atomic_load_explicit(&u->e, memory_order_relaxed) <= 0 || u == g->s || u == g->t){
             continue;
         }    //skip this node
 
@@ -343,24 +342,24 @@ void prep_phase(graph_t* g, int thread_id, int start_node, int end_node){
             bool expected_v = false;
 
             //try to claim u node
-            if(!atomic_compare_exchange_strong(&u->queued, &expected_u, true)){
+            if(!atomic_compare_exchange_strong_explicit(&u->queued, &expected_u, true, memory_order_relaxed, memory_order_relaxed)){
                 edges = edges->next;
                 continue;
             }
 
             //try to claim v node
-            if(!atomic_compare_exchange_strong(&v->queued, &expected_v, true)){
+            if(!atomic_compare_exchange_strong_explicit(&v->queued, &expected_v, true, memory_order_relaxed, memory_order_relaxed)){
 
-                atomic_store(&u->queued, false);
+                atomic_store_explicit(&u->queued, false, memory_order_relaxed);
                 edges = edges->next;
                 continue;
             }
 
 
             int direction = (u == e->u) ? 1 : -1;
-            int u_h = atomic_load(&u->h);
-            int v_h = atomic_load(&v->h);
-            int u_e = atomic_load(&u->e);
+            int u_h = atomic_load_explicit(&u->h, memory_order_relaxed);
+            int v_h = atomic_load_explicit(&v->h, memory_order_relaxed);
+            int u_e = atomic_load_explicit(&u->e, memory_order_relaxed);
 
             if(u->h > v->h && (direction * e->f) < e->c){
                 int flow = MIN(u->e, e->c - direction*e->f);
@@ -375,12 +374,12 @@ void prep_phase(graph_t* g, int thread_id, int start_node, int end_node){
                    g->thread_ops[thread_id].total_worked++;
 
                 }else{
-                    atomic_store(&u->queued, false);
-                    atomic_store(&v->queued, false);
+                    atomic_store_explicit(&u->queued, false, memory_order_relaxed);
+                    atomic_store_explicit(&v->queued, false, memory_order_relaxed);
                 }
             }else{
-                atomic_store(&u->queued, false);
-                atomic_store(&v->queued, false);
+                atomic_store_explicit(&u->queued, false, memory_order_relaxed);
+                atomic_store_explicit(&v->queued, false, memory_order_relaxed);
             }
 
             edges = edges->next;
@@ -388,10 +387,10 @@ void prep_phase(graph_t* g, int thread_id, int start_node, int end_node){
         }
 
         //if no push was found and the node has excess ->relabel
-        if(!found_push && atomic_load(&u->e) > 0){
+        if(!found_push && atomic_load_explicit(&u->e, memory_order_relaxed) > 0){
             bool expected = false;
 
-            if(atomic_compare_exchange_strong(&u->queued, &expected, true)){
+            if(atomic_compare_exchange_strong_explicit(&u->queued, &expected, true, memory_order_relaxed, memory_order_relaxed)){
                 add_operation(thread_ops, u, NULL, NULL, 0, true);
                 g->has_work[thread_id] = true;
 
@@ -415,8 +414,8 @@ void action_phase(graph_t* g, int thread_id){
                 operation_t* op = &ops->operations[i];
 
                 if(op->should_relabel){
-                    atomic_fetch_add(&op->u->h, 1);
-                    atomic_store(&op->u->queued, false);
+                    atomic_fetch_add_explicit(&op->u->h, 1, memory_order_relaxed);
+                    atomic_store_explicit(&op->u->queued, false, memory_order_relaxed);
                 }else{
 
                     node_t* u = op->u;
@@ -429,15 +428,15 @@ void action_phase(graph_t* g, int thread_id){
                     }else{
                         e->f -= d;
                     }
-                    atomic_fetch_sub(&u->e, d);
-                    atomic_fetch_add(&v->e, d);
+                    atomic_fetch_sub_explicit(&u->e, d, memory_order_relaxed);
+                    atomic_fetch_add_explicit(&v->e, d, memory_order_relaxed);
 
                     assert(d >= 0);
-                    assert(atomic_load(&u->e) >= 0);
+                    assert(atomic_load_explicit(&u->e, memory_order_relaxed) >= 0);
                     assert(abs(e->f) <= e->c);
 
-                    atomic_store(&u->queued, false);
-                    atomic_store(&v->queued, false);
+                    atomic_store_explicit(&u->queued, false, memory_order_relaxed);
+                    atomic_store_explicit(&v->queued, false, memory_order_relaxed);
                 }
             }
         }

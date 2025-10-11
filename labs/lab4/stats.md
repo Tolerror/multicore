@@ -127,3 +127,11 @@ It also introduces locks under the hood even if there is no concurrency.
 
 
 
+#Different memory model execution times:
+
+Strictly sequentially consistent:
+11.76user 1.79system 0:02.16elapsed 626%CPU (0avgtext+0avgdata 88776maxresident)k
+
+Relaxed:
+11.16user 1.41system 0:02.02elapsed 620%CPU (0avgtext+0avgdata 88140maxresident)k
+
