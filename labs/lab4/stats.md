@@ -133,5 +133,5 @@ Strictly sequentially consistent:
 11.76user 1.79system 0:02.16elapsed 626%CPU (0avgtext+0avgdata 88776maxresident)k
 
 Relaxed:
-11.16user 1.41system 0:02.02elapsed 620%CPU (0avgtext+0avgdata 88140maxresident)k
+10.76user 1.44system 0:01.75elapsed 697%CPU (0avgtext+0avgdata 88164maxresident)k
 
