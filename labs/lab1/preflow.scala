@@ -19,11 +19,12 @@ case class Source(n: Int) // send to the source node, and inform the height the 
 case class IncomingFlow(n: Int) // flow was sent by source
 case class OutgoingFlow(n: Int) // flow was received by sink  
 case class PushRequest(node: Int, edge : Edge, flow: Int, height: Int)
-case class Reject(flow: Int)
+case class Reject(flow: Int, edge: Edge)
 case class Done(status: Boolean)
 case class TerminationCheck(epoch: Int)
 case class TerminationResponse(nodeIndex: Int, isDone: Boolean, epoch: Int)
 case class NodeActivity(nodeIndex: Int, isActive: Boolean)
+
 
 case object Print // case object for singletons for parameterless messages. 
 case object Start
@@ -148,6 +149,20 @@ class Node(val index: Int) extends Actor {
     case Excess => { sender ! Flow(e) /* send our current excess preflow to actor that asked for it. */ }
 
     case edge:Edge => { this.edge = edge :: this.edge /* put this edge first in the adjacency-list. */ }
+=======
+	case Flow(f:Int) =>{
+		e += f
+		custom_print("update the flow to: " + e)
+		//for (e <- edge){
+		//	if(e.v == sender || e.u == sender){
+		//		e.f += f
+				//println(s"flow from edge ${e.u} to ${e.v} to ${e.f}") 	
+		//	}
+		//}
+		if(!source && !sink){ self ! Hello }
+		else{
+			sender ! Reject(flow,edge)
+		}
 
     case Control(control:ActorRef)	=> {
       this.control = control
@@ -234,6 +249,8 @@ class Node(val index: Int) extends Actor {
 
     
 
+	
+
 }
 
 
@@ -257,6 +274,9 @@ class Preflow extends Actor
 
     def sendFinishRequestToNodes(): Unit = {
       if(isTerminating) return  //already in terminating process, exit
+=======
+		node(t) ! Sink
+		node(s) ! Source(n) // note: use node(index) for array access.
 
       isTerminating = true
       terminationEpoch += 1
@@ -275,6 +295,11 @@ class Preflow extends Actor
       if(nodeResponses.size == expectedResponses){
         val allCurrentEpoch = nodeResponses.values.forall(_._2 == terminationEpoch)
         val allInactive = nodeResponses.values.forall(_._1 == true)
+=======
+		
+		//node(t) ! Excess	/* ask sink for its excess preflow (which certainly still is zero). */
+	}
+	
 
         if(allCurrentEpoch && allInactive){
           if(activeNodes.isEmpty){

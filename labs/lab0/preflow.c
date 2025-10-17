@@ -274,7 +274,7 @@ static void add_edge(node_t* u, edge_t* e)
 	 *
 	 */
 
-	p = xmalloc(sizeof(list_t));
+	p = xmalloc(sizeof(list_t)); // alocate memory for a new list_t element (p)
 	p->edge = e;
 	p->next = u->edge;
 	u->edge = p;

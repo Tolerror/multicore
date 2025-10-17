@@ -1,1 +1,14 @@
-**/*.o
+.metals/
+# Scala build artifacts
+target/
+.bloop/
+.metals/
+project/target/
+project/.bloop/
+
+# SBT distribution
+sbt-dist/
+
+# generated files: 
+.class
+labs/lab2/java/out
