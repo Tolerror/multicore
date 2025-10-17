@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 [error] /home/tolerror/programming/school/multicore/labs/lab1/preflow.scala:248:34: not found: type Boolena
 [error]     var nodeResponses: Map[Int, (Boolena, Int)] = Map() //Node index -> (isDone, time epoch)
 [error]                                  ^
@@ -5,3 +6,7 @@
 [error]         if(!isTerminating) return
 [error]                            ^
 [error] two errors found
+=======
+[warn] there was one deprecation warning (since 2.13.0); re-run with -deprecation for details
+[warn] one warning found
+>>>>>>> 9b276e8 (check point)
