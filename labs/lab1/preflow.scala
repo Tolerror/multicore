@@ -61,27 +61,7 @@ class Node(val index: Int) extends Actor {
 
     def other(a:Edge, u:ActorRef) : ActorRef = { if (u == a.u) a.v else a.u }
 
-<<<<<<< HEAD
     def status: Unit = { if (debug) println(id + " e = " + e + ", h = " + h) }
-=======
-	def custom_print (str: String): Unit = 
-		{if (debug) println(str +s" mess from ${id}")}
-	
-	def start_push : Unit = {
-		var start_flow = 0;
-		for (ed <- edge){
-			custom_print("start push to " + ed.v)
-			// find repecipent 
-			if (ed.u == self){
-				ed.f = ed.c
-				start_flow += ed.c
-				ed.v ! Flow(ed.c)
-			}
-			e = - start_flow
-		}
-		//println(s"flow from source from beginning ${start_flow} excess preflow from source ${e} ")
-	}
->>>>>>> 9b276e8 (check point)
 
     def custom_print (str: String): Unit = 
         {if (debug) println(str +s" mess from ${id}")}
@@ -168,7 +148,6 @@ class Node(val index: Int) extends Actor {
 
     case Excess => { sender ! Flow(e) /* send our current excess preflow to actor that asked for it. */ }
 
-<<<<<<< HEAD
     case edge:Edge => { this.edge = edge :: this.edge /* put this edge first in the adjacency-list. */ }
 =======
 	case Flow(f:Int) =>{
@@ -182,14 +161,14 @@ class Node(val index: Int) extends Actor {
 		//}
 		if(!source && !sink){ self ! Hello }
 		else{
-			if (source){
-				control ! Source(e)  
+			if (edge.u == sender){
+				edge.f -= flow // forward-push request
 			}
-			if (sink){
-				control ! Flow(e)
+			else{
+				edge.f += flow // backward-push request
 			}
+			sender ! Reject(flow)
 		}
->>>>>>> 9b276e8 (check point)
 
     case Control(control:ActorRef)	=> {
       this.control = control
@@ -203,7 +182,6 @@ class Node(val index: Int) extends Actor {
     // when receiving the message from the controller, indicating the node is a sink
     // the sink attribute sets to true. 
 
-<<<<<<< HEAD
     case Source(n:Int)	=> { 
       // custom_print("set to source")
       h = n; 
@@ -211,41 +189,6 @@ class Node(val index: Int) extends Actor {
       start_push
     }
     /* while receving this the source flag would be set to true */ 
-=======
-	case Hello =>{
-		if (e > 0 && !sink && !source){
-			var pushSuccessful = false
-			for (ed <- edge if!pushSuccessful ){
-				if (ed.u == self && ed.c > ed.f){
-					implicit val timeout = Timeout(20.seconds)
-					var heightFuture = ed.v ? GetHeight
-					var height = Await.result(heightFuture, timeout.duration).asInstanceOf[Int]
-					if (h > height){
-						var flowToPush = min(e, ed.c - ed.f)
-						e -= flowToPush
-						ed.f += flowToPush
-						//println(s"push from ${index} with flow ${flowToPush}")   
-						ed.v ! Flow(flowToPush)
-						//self ! Hello
-						pushSuccessful = true
-					}
-				}
-				else if (ed.v == self && ed.f > 0){
-					implicit val timeout = Timeout(20.seconds)
-					var heightFuture = ed.u ? GetHeight
-					var height = Await.result(heightFuture, timeout.duration).asInstanceOf[Int]
-					if (h > height){
-						var flowToBack = min(e, ed.f)
-						e -= flowToBack
-						//println(s"before update ${ed.f}")
-						ed.f = ed.f - flowToBack
-						println(s"push back from ${index} with flow ${ed.f}")   
-						ed.u ! Flow(flowToBack)
-						//self ! Hello
-						pushSuccessful = true
-					}
-				}
->>>>>>> 9b276e8 (check point)
 
     case PushRequest(node: Int, edge : Edge, flow: Int, height: Int) => {
         // custom_print("get push request from "  +id )
@@ -317,7 +260,6 @@ class Node(val index: Int) extends Actor {
 
 class Preflow extends Actor
 {
-<<<<<<< HEAD
     var	s	= 0;			/* index of source node.					*/
     var	t	= 0;			/* index of sink node.					*/
     var	n	= 0;            /* number of vertices in the graph.				*/
@@ -332,25 +274,13 @@ class Preflow extends Actor
     var nodeResponses: Map[Int, (Boolean, Int)] = Map() //Node index -> (isDone, time epoch)
     var isTerminating = false
     var activeNodes = Set[Int]()  //tracking which nodes are currently active
-=======
-	var	s	= 0;			/* index of source node.					*/
-	var	t	= 0;			/* index of sink node.					*/
-	var	n	= 0;            /* number of vertices in the graph.				*/
-	var	edge:Array[Edge]	= null	/* edges in the graph.						*/
-	var	node:Array[ActorRef]	= null	/* vertices in the graph.					*/
-	var	ret:ActorRef 		= null	/* Actor to send result to.					*/
-	
-	def receive = {
->>>>>>> 9b276e8 (check point)
 
 
-<<<<<<< HEAD
     def sendFinishRequestToNodes(): Unit = {
       if(isTerminating) return  //already in terminating process, exit
 =======
 		node(t) ! Sink
 		node(s) ! Source(n) // note: use node(index) for array access.
->>>>>>> 9b276e8 (check point)
 
       isTerminating = true
       terminationEpoch += 1
@@ -361,33 +291,11 @@ class Preflow extends Actor
         }
     }
 
-<<<<<<< HEAD
-=======
-	case Flow(f:Int) => {
-			/* somebody (hopefully the sink) told us its current excess preflow. */
-		implicit val timeout = Timeout(20.seconds)
-		val sourceFuture = node(s) ? Excess
-		val sourceResult = Await.result(sourceFuture, timeout.duration)
-    	val sourceExess = sourceResult match {
-      		case Flow(f) => f
-      		case i: Int => i
-      		case _ => throw new Exception("Unexpected message type for sink excess")
-    	}
-
-		if (f == abs(sourceExess) && ret != null){
-			ret ! f
-		}
-	
-	}
-	/* 
-		recive the flow value (from the sink node), and sends it to actor stored in ret
->>>>>>> 9b276e8 (check point)
 
 
     def checkTerminationComplete(): Unit = {
       val expectedResponses = node.length - 2 //All nodes except source and sink
 
-<<<<<<< HEAD
       if(nodeResponses.size == expectedResponses){
         val allCurrentEpoch = nodeResponses.values.forall(_._2 == terminationEpoch)
         val allInactive = nodeResponses.values.forall(_._1 == true)
@@ -396,17 +304,6 @@ class Preflow extends Actor
 		//node(t) ! Excess	/* ask sink for its excess preflow (which certainly still is zero). */
 	}
 	
-	case Source(n:Int) =>{
-		var fromSource = abs(n);
-		implicit val timeout = Timeout(20.seconds)
-		val sinkFuture = node(t) ? Excess
-		val sinkResult = Await.result(sinkFuture, timeout.duration)
-    	val sinkExess = sinkResult match {
-      		case Flow(f) => f
-      		case i: Int => i
-      		case _ => throw new Exception("Unexpected message type for sink excess")
-    	}
->>>>>>> 9b276e8 (check point)
 
         if(allCurrentEpoch && allInactive){
           if(activeNodes.isEmpty){
@@ -526,11 +423,7 @@ class Preflow extends Actor
 }
 
 object main extends App {
-<<<<<<< HEAD
     implicit val t = Timeout(120.seconds);
-=======
-	implicit val t = Timeout(120.seconds);
->>>>>>> 9b276e8 (check point)
 
     val	begin = System.currentTimeMillis()
     val system = ActorSystem("Main")
@@ -546,17 +439,10 @@ object main extends App {
     n = s.nextInt
     m = s.nextInt
 
-<<<<<<< HEAD
     //println(s"node ${n} nbr edges ${m} ")
     /* next ignore c and p from 6railwayplanning */
     s.nextInt
     s.nextInt
-=======
-	println(s"node ${n} nbr edges ${m} ")
-	/* next ignore c and p from 6railwayplanning */
-	s.nextInt
-	s.nextInt
->>>>>>> 9b276e8 (check point)
 
     node = new Array[ActorRef](n)
 
@@ -567,7 +453,6 @@ object main extends App {
     // create edges
     for (i <- 0 to m-1) {
 
-<<<<<<< HEAD
         val u = s.nextInt
         val v = s.nextInt
         val c = s.nextInt
@@ -578,14 +463,6 @@ object main extends App {
         node(u) ! edge(i)
         node(v) ! edge(i)
     }
-=======
-		val u = s.nextInt
-		val v = s.nextInt
-		val c = s.nextInt
-		
-		println(s"edges from ${u} to ${v} capacity ${c}")
-		edge(i) = new Edge(node(u), node(v), c)
->>>>>>> 9b276e8 (check point)
 
     control ! node // "fire-and-forget" message, sends the array of node actors to Preflow actor
     control ! edge // the message is delivered and processed whenever the receiver is ready.
