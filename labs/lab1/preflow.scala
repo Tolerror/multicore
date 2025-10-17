@@ -25,6 +25,7 @@ case class TerminationCheck(epoch: Int)
 case class TerminationResponse(nodeIndex: Int, isDone: Boolean, epoch: Int)
 case class NodeActivity(nodeIndex: Int, isActive: Boolean)
 
+
 case object Print // case object for singletons for parameterless messages. 
 case object Start
 case object Excess
