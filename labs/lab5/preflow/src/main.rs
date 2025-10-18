@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 struct Node {
 	i:	usize,			/* index of itself for debugging.	*/
 	e:	i32,			/* excess preflow.			*/
-	h:	i32,			/* height.				*/
+	h:	usize,			/* height.				*/
 }
 
 struct Edge {
@@ -80,9 +80,15 @@ fn push(u_index:usize, v_index:usize, e:&mut Edge, node:&mut Vec<Node>, excess:&
         enter_excess(u_index, excess);
     }
 
-    if node[v_index].e > 0 {
+    if node[v_index].e == d {
         enter_excess(v_index, excess);
     }
+}
+
+
+fn relabel(u:usize, node:&mut Vec<Node>, edge: &Vec<Edge>, adj: &Vec<LinkedList<usize>>) {
+    node[u].h += 1;
+   
 }
 
 fn main() {
@@ -96,12 +102,15 @@ fn main() {
 	let mut adj: Vec<LinkedList<usize>> = Vec::with_capacity(n);
 	let mut excess: VecDeque<usize> = VecDeque::new();
 	let debug = true;
+    let mut f: i32 = 0; //final flow
 
-    S.set(0).expect("you cannot set s twice");
-    T.set(n-1).expect("you cannot set s twice");
-
+    S.set(0).expect("you cannot set s twice");  //set them once, and use as global variables
+    T.set(n-1).expect("you cannot set t twice");    //set them once, and use as global variables
+    
 	println!("n = {}", n);
 	println!("m = {}", m);
+    // println!("s = {}", get_s());
+    // println!("t = {}", get_t());
 
 	for i in 0..n {
 		let u:Node = Node::new(i);
@@ -119,6 +128,7 @@ fn main() {
 		edge.push(e); 
 	}
 
+
 	if debug {
 		for i in 0..n {
 			print!("adj[{}] = ", i);
@@ -131,14 +141,17 @@ fn main() {
 		}
 	}
 
+    node[get_s()].h = n;
+
 	println!("initial pushes");
 	let iter = adj[get_s()].iter();
 
 	// but nothing is done here yet...
     
     //initial source pushes
-    for e in iter {     //returns the address of e (&usize)
-        push(get_s(), other(get_s(), &edge[*e]), &mut edge[*e], &mut node, &mut excess);
+    for &e in iter {     //returns the address of e (&usize)
+        node[get_s()].e += edge[e].c;
+        push(get_s(), other(get_s(), &edge[e]), &mut edge[e], &mut node, &mut excess);
     }
 
 
@@ -152,34 +165,39 @@ fn main() {
         
         let iter_u_nodes = adj[u].iter(); //node u's adjacent node list LinkedList<usize>
 
-        for u_edge in iter_u_nodes {  //iterate through edges (&usize)
-            e = *u_edge;
-            if u == edge[*u_edge].u {
-                v = edge[*u_edge].v;
-                b = 1;
+        for &u_edge in iter_u_nodes {  //iterate through edges (&usize)
+            e = u_edge;
+
+            if u == edge[u_edge].u {
+                v = edge[u_edge].v;
+                if node[u].h > node[v].h && edge[u_edge].f < edge[u_edge].c {
+                    found = true;
+                    break;
+                }
+                // else { found = false; }
+
             }else{
-                v = edge[*u_edge].u;
-                b = -1;
+                v = edge[u_edge].u;
+                if node[u].h > node[v].h && edge[u_edge].f > 0 {
+                    found = true;
+                    break;
+                }
+                // else { found = false; }
             }
 
-            //if u.h > v.h && edge has capacity 
-            if node[u].h > node[v].h && b >= 1 && edge[*u_edge].f < edge[*u_edge].c { //TODO: b is questionable
-                found = true;
-                break;
-            }else{
-                found = false; //node was not valid
-            }
         }
         
         if found {
             push(u, v, &mut edge[e], &mut node, &mut excess);
             found = false;
         }else{
-            //relabel
+            relabel(u, &mut node, &edge, &adj);
+            enter_excess(u, &mut excess)
         }
-        
 	}
 
-	println!("f = {}", 0);
+    f = node[get_t()].e;
+
+	println!("f = {}", f);
 
 }
