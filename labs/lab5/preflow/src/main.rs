@@ -3,12 +3,12 @@
 //use std::sync::{Mutex,Arc};
 use std::collections::LinkedList;
 use std::cmp;
-use std::thread;
+// use std::thread;
 use std::collections::VecDeque;
 use std::sync::OnceLock;
 
 struct Node {
-	i:	usize,			/* index of itself for debugging.	*/
+	_i:	usize,			/* index of itself for debugging.	*/
 	e:	i32,			/* excess preflow.			*/
 	h:	usize,			/* height.				*/
 }
@@ -22,7 +22,7 @@ struct Edge {
 
 impl Node {
 	fn new(ii:usize) -> Node {
-		Node { i: ii, e: 0, h: 0 }
+		Node { _i: ii, e: 0, h: 0 }
 	}
 
 }
@@ -86,7 +86,7 @@ fn push(u_index:usize, v_index:usize, e:&mut Edge, node:&mut Vec<Node>, excess:&
 }
 
 
-fn relabel(u:usize, node:&mut Vec<Node>, edge: &Vec<Edge>, adj: &Vec<LinkedList<usize>>) {
+fn relabel(u:usize, node:&mut Vec<Node>) {
     node[u].h += 1;
    
 }
@@ -102,7 +102,7 @@ fn main() {
 	let mut adj: Vec<LinkedList<usize>> = Vec::with_capacity(n);
 	let mut excess: VecDeque<usize> = VecDeque::new();
 	let debug = true;
-    let mut f: i32 = 0; //final flow
+    let f: i32; //final flow
 
     S.set(0).expect("you cannot set s twice");  //set them once, and use as global variables
     T.set(n-1).expect("you cannot set t twice");    //set them once, and use as global variables
@@ -156,7 +156,7 @@ fn main() {
 
 
 	while !excess.is_empty() {  //as long as there are excess nodes
-		let mut c = 0;
+		let _c = 0;
 		let u = excess.pop_front().unwrap();
         let mut b: i32;
         let mut v: usize = 0; //may be unitialized, v node
@@ -171,23 +171,12 @@ fn main() {
             if u == edge[u_edge].u {
                 v = edge[u_edge].v;
                 b = 1;
-                // if node[u].h > node[v].h && edge[u_edge].f < edge[u_edge].c {
-                    // found = true;
-                    // break;
-                // }
-                // else { found = false; }
-
             }else{
                 v = edge[u_edge].u;
                 b = -1;
-                // if node[u].h > node[v].h && edge[u_edge].f > 0 {
-                //     found = true;
-                //     break;
-                // }
-                // else { found = false; }
             }
 
-            if(node[u].h > node[v].h && b*edge[u_edge].f < edge[u_edge].c){
+            if node[u].h > node[v].h && b*edge[u_edge].f < edge[u_edge].c {
                 found = true;
                 break;
             }else{
@@ -198,9 +187,8 @@ fn main() {
         
         if found {
             push(u, v, &mut edge[e], &mut node, &mut excess);
-            // found = false;
         }else{
-            relabel(u, &mut node, &edge, &adj);
+            relabel(u, &mut node);
             enter_excess(u, &mut excess)
         }
 	}
