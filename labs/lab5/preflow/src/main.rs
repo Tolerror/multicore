@@ -158,7 +158,7 @@ fn main() {
 	while !excess.is_empty() {  //as long as there are excess nodes
 		let mut c = 0;
 		let u = excess.pop_front().unwrap();
-        let mut b: i8;
+        let mut b: i32;
         let mut v: usize = 0; //may be unitialized, v node
         let mut e: usize = 0;  //may be unitiliazed, edge
         let mut found: bool = false;
@@ -170,26 +170,35 @@ fn main() {
 
             if u == edge[u_edge].u {
                 v = edge[u_edge].v;
-                if node[u].h > node[v].h && edge[u_edge].f < edge[u_edge].c {
-                    found = true;
-                    break;
-                }
+                b = 1;
+                // if node[u].h > node[v].h && edge[u_edge].f < edge[u_edge].c {
+                    // found = true;
+                    // break;
+                // }
                 // else { found = false; }
 
             }else{
                 v = edge[u_edge].u;
-                if node[u].h > node[v].h && edge[u_edge].f > 0 {
-                    found = true;
-                    break;
-                }
+                b = -1;
+                // if node[u].h > node[v].h && edge[u_edge].f > 0 {
+                //     found = true;
+                //     break;
+                // }
                 // else { found = false; }
+            }
+
+            if(node[u].h > node[v].h && b*edge[u_edge].f < edge[u_edge].c){
+                found = true;
+                break;
+            }else{
+                found = false;
             }
 
         }
         
         if found {
             push(u, v, &mut edge[e], &mut node, &mut excess);
-            found = false;
+            // found = false;
         }else{
             relabel(u, &mut node, &edge, &adj);
             enter_excess(u, &mut excess)
