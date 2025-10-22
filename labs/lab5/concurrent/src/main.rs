@@ -22,9 +22,9 @@ struct Edge {
 }
 
 struct Operation {
-    u: Node,
-    v: Node,
-    e: Edge,
+    u: usize,
+    v: Option<usize>,
+    e: Option<Arc<Mutex<Edge>>>,
     should_relabel: bool,
     flow_to_push: i32,
 }
@@ -49,7 +49,7 @@ impl Edge {
 }
 
 impl Operation {
-    fn new(u:Node, v:Node, e:Edge, should_relabel:bool, flow_to_push:i32) -> Operation {
+    fn new(u:usize, v:Option<usize>, e:Option<Arc<Mutex<Edge>>>, should_relabel:bool, flow_to_push:i32) -> Operation {
         Operation {u, v, e, should_relabel, flow_to_push}
     }
 }
@@ -81,7 +81,7 @@ fn get_t() -> usize {
     *T.get().expect("T not yet initialized")
 }
 
-fn other(u:usize, e:&Edge, nodes: &Vec<Arc<Mutex<Node>>>) -> usize {
+fn other(u:usize, e:&Edge, _nodes: &Vec<Arc<Mutex<Node>>>) -> usize {
     if u == e.u {
         return e.v;
     }else{
@@ -129,31 +129,6 @@ fn relabel(u_index:usize, node: &Vec<Arc<Mutex<Node>>>) {
 }
 
 
-fn thread_work(     
-    start:usize, 
-    end:usize, 
-    node: Arc<Vec<Arc<Mutex<Node>>>>, 
-    edge: Arc<Vec<Arc<Mutex<Edge>>>>, 
-    adj: Arc<Vec<LinkedList<usize>>>, 
-    excess: Arc<Mutex<VecDeque<usize>>>
-) {
-
-    for j in start..end {
-        let node_arc = &node[j];
-        let mut node_lock = node_arc.lock().unwrap();
-
-        let adj_nodes = &adj[j];
-        for &edge_index in adj_nodes {
-            let edge_arc = &edge[edge_index];
-            let edge_lock = edge_arc.lock().unwrap();
-            //work with edge
-
-            //drop(edge_lock)
-        }
-
-    }
-
-}
 
 fn prep_phase(
     node: &Arc<Vec<Arc<Mutex<Node>>>>,
@@ -165,7 +140,74 @@ fn prep_phase(
     start_node: usize,
     end_node: usize
 ){
-    //TODO: prep phase
+    //iterate through delegated range of nodes
+    for n_idx in start_node..end_node {
+        // let u_arc = node[n_idx].clone();
+        // let u = u_arc.lock().unwrap();
+        let u_e;
+        let u_h;
+        let u_i;
+
+        {
+            let u = node[n_idx].lock().unwrap();
+            if u.e <= 0 || u.i == get_s() || u.i == get_t() {
+                continue;
+            }
+            u_e = u.e;
+            u_h = u.h;
+            u_i = u.i;
+        }
+
+        let mut found_push:bool = false;
+        let adj_iter = adj[u_i].iter();
+
+        for &e_idx_lock in adj_iter { //iterate through all edges till we find viable push
+            
+            let v_idx:usize; 
+            let direction:i32;
+            // let e_idx_arc = &edge[e_idx_lock];
+            // let e_idx = e_idx_arc.lock().unwrap();
+            let e_c;
+            let e_f;
+
+            {
+                let e_idx = edge[e_idx_lock].lock().unwrap();
+                if u_i == e_idx.u {
+                    v_idx = e_idx.v;
+                    direction = 1;
+                }else{
+                    v_idx = e_idx.u; 
+                    direction = -1;
+                } 
+                e_c = e_idx.c;
+                e_f = e_idx.f;
+            }
+
+            let v_h;
+            {
+                let v = node[v_idx].lock().unwrap();
+                v_h = v.h;
+            }
+
+            // let v_arc = node[v_idx].clone();
+            // let v = v_arc.lock().unwrap();
+            if u_h > v_h && (direction * e_f) < e_c {
+                let flow = cmp::min(u_e, e_c - direction*e_f);
+                if flow > 0 {
+                    let mut thread_op_arr = thread_ops[thread_id].lock().unwrap(); 
+                    let op = Operation::new(u_i, Some(v_idx), Some(edge[e_idx_lock].clone()), false, flow);
+                    thread_op_arr.operations.push(op);
+                    found_push = true;
+                }
+            }
+        }
+
+        if !found_push && u_e > 0 {
+            let op = Operation::new(u_i, None, None, true, 0);
+            let mut thread_op_arr = thread_ops[thread_id].lock().unwrap();
+            thread_op_arr.operations.push(op);
+        }
+    }
 }
 
 fn action_phase(
@@ -175,9 +217,60 @@ fn action_phase(
     excess: &Arc<Mutex<VecDeque<usize>>>,
     thread_ops: &Arc<Vec<Mutex<ThreadOperations>>>,
     is_done: &Arc<Mutex<bool>>,
-    nbr_threads: usize
+    nbr_threads: usize,
+    thread_id: usize
 ){
-    //TODO: action phase
+    
+    if thread_id == 0 {
+       let mut any_work:bool = false; 
+
+        for i in 0..nbr_threads {
+            let thread_op_arr_arc = &thread_ops[i];
+            let mut thread_op_arr = thread_op_arr_arc.lock().unwrap();
+            if !thread_op_arr.operations.is_empty(){
+                any_work = true; 
+            }
+
+            while let Some(op) = thread_op_arr.operations.pop() {
+
+                if op.should_relabel {
+                    let u_arc = &node[op.u];
+                    let mut u = u_arc.lock().unwrap();
+                    u.h += 1;
+                }else{
+
+                    let u_arc = &node[op.u];
+                    let mut u = u_arc.lock().unwrap();
+
+                    if let Some(v_idx) = op.v {
+                        let v_arc = &node[v_idx];
+                        let mut v = v_arc.lock().unwrap();
+
+                        if let Some(edge_arc) = &op.e {
+                            let edge_lock = edge_arc.clone();
+                            let mut edge = edge_lock.lock().unwrap();
+                            let flow = op.flow_to_push;
+
+                            if u.i == edge.u {
+                                edge.f += flow;
+                            }else{
+                                edge.f -= flow;
+                            }
+                            u.e -= flow;
+                            v.e += flow;
+                        }
+                    }
+                }
+            }
+        }
+
+        if !any_work {
+            //just do access and mutate the is_done bool value
+            let is_done_clone = is_done.clone();
+            let mut is_done_lock = is_done_clone.lock().unwrap();
+            *is_done_lock = true;
+        }
+    }
 }
 
 
@@ -210,7 +303,7 @@ fn main() {
 		adj.push(LinkedList::new());
 	}
 
-    {   //block to set node[s].h = n    ridiculous
+    {   //block to set node[s].h = n    
         let source_clone = Arc::clone(&node[get_s()]);
         let mut source_lock = source_clone.lock().unwrap();
         source_lock.h = n;
@@ -242,24 +335,24 @@ fn main() {
 
 	let iter = adj[get_s()].iter(); //adjacency list with edges to source node
 
-    //initial source pushes
-    for &e_index in iter {                    
+	   //initial source pushes
+	   for &e_index in iter {                    
 
-        let e_arc = edge[e_index].clone();
-        let mut e_lock = e_arc.lock().unwrap();
+	       let e_arc = edge[e_index].clone();
+	       let mut e_lock = e_arc.lock().unwrap();
 
-        let u_arc = node[get_s()].clone();
-        let mut u_lock = u_arc.lock().unwrap();
+	       let u_arc = node[get_s()].clone();
+	       let mut u_lock = u_arc.lock().unwrap();
 
-        u_lock.e += e_lock.c;
-        
-        let v_index = other(u_lock.i, &*e_lock, &node);
+	       u_lock.e += e_lock.c;
 
-        drop(u_lock);
-        drop(e_lock);
+	       let v_index = other(u_lock.i, &*e_lock, &node);
 
-        push(get_s(), v_index, e_index, &node, &edge, &mut excess);
-    }
+	       drop(u_lock);
+	       drop(e_lock);
+
+	       push(get_s(), v_index, e_index, &node, &edge, &mut excess);
+	   }
 
     //threads init
     let node = Arc::new(node);
@@ -313,7 +406,8 @@ fn main() {
                         &excess_clone,
                         &thread_ops_clone,
                         &is_done_clone,
-                        nbr_threads
+                        nbr_threads,
+                        i
                     );
                 }
 
@@ -330,51 +424,6 @@ fn main() {
     for t in threads {  //all threads done at this point
         t.join().unwrap();
     }
-
-    let mut excess = excess.lock().unwrap();
-
-    while !excess.is_empty() {  //as long as there are excess nodes
-
-        let u = excess.pop_front().unwrap();
-        let mut b: i32;
-        let mut v: usize = 0; //may be unitialized, v node
-        let mut e: usize = 0;  //may be unitiliazed, edge
-        let mut found: bool = false;
-        
-        let iter_u_node = adj[u].iter(); //node u's adjacent node list LinkedList<usize>
-
-        for &u_edge in iter_u_node {  //iterate through edges (&usize)
-            e = u_edge;
-
-            let edge_lock = edge[u_edge].lock().unwrap();
-            let node_u_lock = node[u].lock().unwrap();
-
-            if u == edge_lock.u {
-                v = edge_lock.v;
-                b = 1;
-            }else{
-                v = edge_lock.u;
-                b = -1;
-            }
-
-            let node_v_lock = node[v].lock().unwrap();
-
-            if node_u_lock.h > node_v_lock.h && b*edge_lock.f < edge_lock.c {
-                found = true;
-                break;
-            }else{
-                found = false;
-            }
-
-        }
-        
-        if found {
-            push(u, v, e, &node, &edge, &mut excess);
-        }else{
-            relabel(u, &node);
-            enter_excess(u, &mut excess)
-        }
-	}
 
     let node_t_lock = node[get_t()].lock().unwrap();
 
