@@ -123,23 +123,19 @@ fn push(u_index:usize, v_index:usize, e_index:usize, node: &Vec<Arc<Mutex<Node>>
 }
 
 
-fn relabel(u_index:usize, node: &Vec<Arc<Mutex<Node>>>) {
-    let mut u = node[u_index].lock().unwrap();
-    u.h += 1;
-}
-
 
 
 fn prep_phase(
     node: &Arc<Vec<Arc<Mutex<Node>>>>,
     edge: &Arc<Vec<Arc<Mutex<Edge>>>>,
     adj: &Arc<Vec<LinkedList<usize>>>,
-    excess: &Arc<Mutex<VecDeque<usize>>>,
+    _excess: &Arc<Mutex<VecDeque<usize>>>,
     thread_ops: &Arc<Vec<Mutex<ThreadOperations>>>,
     thread_id: usize,
     start_node: usize,
     end_node: usize
 ){
+    
     //iterate through delegated range of nodes
     for n_idx in start_node..end_node {
         // let u_arc = node[n_idx].clone();
@@ -162,7 +158,10 @@ fn prep_phase(
         let adj_iter = adj[u_i].iter();
 
         for &e_idx_lock in adj_iter { //iterate through all edges till we find viable push
-            
+          if found_push {
+                return;
+            } 
+
             let v_idx:usize; 
             let direction:i32;
             // let e_idx_arc = &edge[e_idx_lock];
@@ -212,9 +211,9 @@ fn prep_phase(
 
 fn action_phase(
     node: &Arc<Vec<Arc<Mutex<Node>>>>,
-    edge: &Arc<Vec<Arc<Mutex<Edge>>>>,
-    adj: &Arc<Vec<LinkedList<usize>>>,
-    excess: &Arc<Mutex<VecDeque<usize>>>,
+    _edge: &Arc<Vec<Arc<Mutex<Edge>>>>,
+    _adj: &Arc<Vec<LinkedList<usize>>>,
+    _excess: &Arc<Mutex<VecDeque<usize>>>,
     thread_ops: &Arc<Vec<Mutex<ThreadOperations>>>,
     is_done: &Arc<Mutex<bool>>,
     nbr_threads: usize,
@@ -339,7 +338,7 @@ fn main() {
 	   for &e_index in iter {                    
 
 	       let e_arc = edge[e_index].clone();
-	       let mut e_lock = e_arc.lock().unwrap();
+	       let e_lock = e_arc.lock().unwrap();
 
 	       let u_arc = node[get_s()].clone();
 	       let mut u_lock = u_arc.lock().unwrap();
