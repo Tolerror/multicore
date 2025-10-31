@@ -34,7 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define PRINT		1	/* enable/disable prints. */
+#define PRINT		0	/* enable/disable prints. */
 
 /* the funny do-while next clearly performs one iteration of the loop.
  * if you are really curious about why there is a loop, please check

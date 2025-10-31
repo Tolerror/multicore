@@ -58,7 +58,7 @@ struct thread_queue_t{
     queue_item_t* tail;
     pthread_mutex_t t_lock;
     pthread_mutex_t h_lock;
-    pthread_mutex_t wait_queue_lock;
+    pthread_mutex_t queue_wait_lock;
 };
 
 struct list_t
@@ -301,7 +301,7 @@ void init_thread_queue(thread_queue_t** q){
     (*q)->head = (*q)->tail = tmp;
     pthread_mutex_init(&(*q)->h_lock, NULL);
     pthread_mutex_init(&(*q)->t_lock, NULL);
-    pthread_mutex_init(&(*q)->wait_queue_lock, NULL);
+    pthread_mutex_init(&(*q)->queue_wait_lock, NULL);
 }
 
 
@@ -344,7 +344,9 @@ int dequeue_node_index(thread_queue_t* q, graph_t* g){
     int node_index = new_head->node_index;
 
     q->head = new_head;
-    pthread_mutex_unlock(&q->h_lock);
+    // g->v[node_index].queued = false;
+
+    pthread_mutex_unlock(&q->t_lock); //h_lock
 
     pthread_mutex_lock(&g->v[node_index].node_lock);
     g->v[node_index].queued = false;    //irrelevant race condition
@@ -422,9 +424,14 @@ void decrement_active_threads(graph_t* g){
     pthread_mutex_unlock(&g->active_thread_lock);
 }
 
-// bool no_active_threads(graph_t* g){
-//
-// }
+bool no_active_threads(graph_t* g){
+    pthread_mutex_lock(&g->active_thread_lock);
+    bool result = g->active_thread == 0;
+    pthread_mutex_unlock(&g->active_thread_lock);
+    return result;
+}
+
+
 
 bool terminate_req(graph_t* g){
     return g->s->e + g->t->e != 0;
