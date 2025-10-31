@@ -122,3 +122,4 @@ When reading a line modified by another core:
 
 If a cache removes a line in Modified state. It first writes the line back to memory so memory becomes consistent again.
 
+TODO: Next Lecture - 9

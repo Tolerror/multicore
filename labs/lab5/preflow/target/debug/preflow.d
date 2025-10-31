@@ -1,1 +1,1 @@
-/home/tolerror/programming/school/multicore_pair/EDAN26---Multicore/labs/lab5/preflow/target/debug/preflow: /home/tolerror/programming/school/multicore_pair/EDAN26---Multicore/labs/lab5/preflow/src/main.rs
+/home/tolerror/programming/school/multicore/labs/lab5/preflow/target/debug/preflow: /home/tolerror/programming/school/multicore/labs/lab5/preflow/src/main.rs
