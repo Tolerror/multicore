@@ -84,11 +84,133 @@ Cons: Higher overhead, if the overhead grows sufficiently large it might be more
 
 14. What is meant by systolic array? Why can it give very high performance and why is it difficult to achieve that performance for many programs?
 A systolic array is a method of concurrently processing elements in a systematic pipeline fashion. Data is passed from neighbouring element to the next
-in a synchronized pipelined manner. A good use case for systolic arrays is in matrix multiplication for graphics, where rows and columns are 
+in a synchronized pipelined manner. It is often used with two inputs and two outputs, data flowing systolically - like a "heartbeat". 
+A good use case for systolic arrays is in matrix multiplication for graphics, where rows and columns are 
 multiplied and added in a fixed pattern. This makes it highly parallellizable although most programs often require more "random" or irregular 
 memory accesses that makes systolic arrays not very applicable for most use cases.
 
 15. The Tera architecture was a parallel computer with no cache memories. What was the architectural feature that would give high performance anyway?
+Instead each memory word has a full or empty bit. Writing to the word set the bit and reading it cleared the bit.
+That way no processor has ownership over a word but instead all memory is shared uniformly.
+This way the overhead that comes with caches such as cache coherence problems and cache misses.
+
+16. What does it mean that a multicore is a cache coherent shared memory multiprocessor?
+A multiprocessor has as the name implies multiple processors. For these processors to work in unison in any meaningful way
+data needs to be shared amongst them. This is achieved by each processor having its own cache since reading and writing to and from memory is too slow. 
+Each processor having its own cache comes with the problem of these caches not being synchronized with each other and the shared memory space. 
+Hence the protocols for cache coherence were invented.
+So as a whole, a multicore is therefore a cache coherent shared memory multiprocessor.
+
+17. What is a directory of a memory block in a cache coherent shared memory multiprocessor?
+A directory is a table for each memory block in memory that keeps track of all caches that has copies of data and their states.
+So when a core wants to write to a memory block it consults with the directory of that memory block to send the appropiate messages for cache coherence
+to the caches involved, which saves bandwidth since it does not need to broadcast to all caches.
+Problem arises when the directory has too many entries when too many nodes has a copy of the memory block.
+An alternative is to use a home location instead. Each memory block has a home location i.e. a home node where the directory lives.
+It is the responsibility of the home node to maintain the directory and cache coherence. 
+When a core writes to Shared memory in its cache, it goes to the memory address where
+it finds the home location of the home node, which it then consults. The home node then checks the directory and sends out the appropiate 
+cache coherence messages to the nodes involved.
+
+18. What is the idea with a cache-only memory architecture? and why would that for some programs be more efficient than a normal cache coherent shared memory multiprocessor with a fixed home location of each memory block?
+In COMA instead of having a static home location to each memory block the home location is instead dynamically "fleeting". 
+Data diffuses to a suitable node that currently uses it and becomes the new home. This way the data is more likely to be local on subsequent accesses since it dynamically migrates
+to spots in memory it is being frequently used. This improves performance for programs with dynamic or irregular memory access patterns, compared to static home location cache coherent shared memory multiprocessors.
+
+19. What happens in Java if the main thread calls run on a thread?
+The main thread will instead execute the run() method. Not to be confused with start() that actually creates a new thread which in turn calls run() for that newly created thread.
+
+20. What is the semantics of a synchronized block in Java, and what is an object’s entry set and wait set in Java?
+A synchronized block is in Java is a way to enforce mutual exclusion on some object. The current thread acquires the lock
+for that object and only then is allowed to execute critical code within that block. Other threads are blocked on attempted access to
+the synchronized block if the lock is already held. The lock is released after the thread exits the synchronized block.
+The objects entry set is the queue of threads waiting to acquire the lock for the synchronized block.
+The objects wait set is the queue of threads that have called wait() inside that objects synchronized block. The threads sleep in the queue until a notify() or notifyAll()
+wakes them where they enter the entry set to try to acquire the lock again. When they reacquire the lock they continue from the point after the wait() in the synchronized block.
+
+21. What is meant by a lock being reentrant?
+Reentrant meaning the lock can be acquired by the same thread holding the lock. In other words allows for nested synchronized calls on the same object. Each time a thread holding the lock calls lock() the internal ReentrantLock counter
+is incremented and unlock() decrements it. The lock is released when the counter == 0 on an unlock() call.
+This is a solution so that threads do not deadlock themselves if they recursively call a method on itself directly or indirectly.
+
+22. What is the semantics of volatile in Java (that is, what happens conceptually)?
+Volatile in java enforces that the volatile variable update is seen by all threads. There is no caching involved and the variable is directly written to memory and read from memory.
+The write to a volatile variable happens-before every subsequent read of that variable by any thread.
+
+23. Is volatile in C the same as in Java? (yes/no answer is sufficient)
+No, volatile in C is similar in that the compiler is limited to how it can reorder the volatile variable.
+It means that the compiler is not allowed to do certain optimizations on the variable.
+It does not guarantee the happens-before relation and visibility that Java guarantees.
+
+24. What is the purpose of using a condition variable? Give an example.
+Condition variables are used to allowd threads to wait for some condition to become true before doing something. 
+Threads can sleep on the condition variable until another threads signals that the condition is satisfied, which avoids busy waiting.
+Example:
+Lock lock = new ReentrantLock();
+Condition cond = lock.newCondition();
+boolean ready = false;
+
+//Thread 1
+lock.lock()
+try{
+    while(!ready) 
+        cond.await();
+
+print("Condition met!");
+
+} finally{ lock.unlock(); }
+
+//Thread 2
+lock.lock();
+try{
+    //do something
+    ready = true;
+    cond.signal();
+
+} finally{ lock.unlock(); }
+
+25. Is the operating system kernel always involved when a thread waits for a Pthreads mutex in Linux? Why or why not or when?
+No, if the mutex is uncontended the thread can immediately acquire it without kernel interaction.
+If the mutex is contended the thread may need to sleep, then the kernel have to put the thread to sleep and later wake it up.
+
+26. What is Sequential Consistency? How is it defined? (not word for word but the essence)
+A system is sequentially consistent if the result of an execution is the same as if the operations of all processors were executed in some sequential order,
+and the operations of each processor appear in that sequence in the order specified by the program.
+So all processors see the same global order as if all operations were executed one at a time sequentially.
+
+27. Give one example of a compiler optimization that can break Sequential Consistency, and motivate why it can break it.
+Reordering independent memory operations, meaning if the order for one thread is reordered in such a way that does not align with the global order, sequential consistency is broken.
+Optimizations in the form of reorderings are allowed but not if it affects the program order of any other thread.
+If Thread 1 were to reorder x and y assignments, SC would be violated since Thread 2 depends on the order.
+Example:
+//Thread 1
+x = 1;
+y = 2;
+
+//Thread 2
+if(x == 1){
+    print("hello");
+    if(y == 2){
+    print("world");
+    }
+}
+
+28. What is a write buffer?
+It is a CPU hardware structure that temporarily holds memory writes so that the CPU can continue execution without having to wait for slow memory.
+The write buffer holds the data while the CPU immediately continues executing subsequent instructions.
+The buffer is eventually flushed and the data is written to main memory (in FIFO fashion).
+
+29. Why is it, usually, a good idea to let reads ”bypass” writes, but why can that break Sequential Consistency?
+With read bypass the write buffer, a FIFO queue is bypassed. By passing the write buffer, values that needs to be read for the program to continue executing
+can be fetched immediately without having to wait for the queue. Although by bypassing the writes, the data in the writes won't be visible to other
+threads that might depend on them, which in turn can break SC in case those writes does not confine to the sequential order of the other threads/global order.
+
+30. Why can overlapping writes break Sequential Consistency?
+If writes overlap different processors might observe the writes in different order orders depending on timing or buffering.
+Meaning one processor could observe the value from one write while another processor observer the value from another. 
+Which in turn breaks the global consistent view of memory, hence breaking SC.
+
+31. Why can non-blocking reads break Sequential Consistency?
 
 
 Short transactions - At an L1 cache load the L2 cache is informed such that it can detect conflicts. 
@@ -122,4 +244,3 @@ When reading a line modified by another core:
 
 If a cache removes a line in Modified state. It first writes the line back to memory so memory becomes consistent again.
 
-TODO: Next Lecture - 9
