@@ -211,16 +211,13 @@ Meaning one processor could observe the value from one write while another proce
 Which in turn breaks the global consistent view of memory, hence breaking SC.
 
 31. Why can non-blocking reads break Sequential Consistency?
+A non-blocking read is a read operation that does not wait for pending writes or synchronization.
+It immediately returns whatever value it finds at that given time. The main purpose for this is to increase performance, by allowing speculative data
+the CPU can fetch for data it needs later at an earlier time while waiting for memory for example. 
+This can break sequential consistency since it would allow reads and writes to appear out of the global order in which all thread operations "adhere to".
+If a read is done before a write which another thread depends on, that would break sequential consistency.
 
-
-Short transactions - At an L1 cache load the L2 cache is informed such that it can detect conflicts. 
-When an L1 write is done, the modified cache block is removed from the L1 cache and moved to the L2 cache. 
-Then on subsequent read, an L1 cache miss follows. This is expected.
-
-Long transactions - Can use the L1 cache for speculative state. This means for the L2 cache to keep track on the speculative data in the L1 cache, 
-the L1 cache must be invalidated in its entirety at the start of a new transaction. That way no data that the L2 cache is not aware of can exist.
-An intial L1 cache miss is therefore expected.
-
+32. What it is a cache coherence protocol and which types of messages can it have and what would their purpose be?
 Cache coherence - Is the concept of ensuring that all cores have a consistent view of data. This is done by having cache blocks be in one of the following states, example of the MESI protocol:
 Modified - The only cache with a valid copy, which has been modified. (different from memory)
 Exclusive - The only cache with a valid copy, which has not been modified. (same as in memory)
@@ -229,8 +226,8 @@ Invalid - Cache line is invalid. (fetch new)
 Run through:
 When reading a line:
 - If line isnt in cache -> cache miss. Fetch from memory.
-    if no other core has that data, Exclusive tag.
-    if other cores have it, Shared tag.
+if no other core has that data, Exclusive tag.
+if other cores have it, Shared tag.
 
 When writing to a line:
 - If line is Shared or Exclusive, cache must get exclusive ownership first before modifying.
@@ -243,4 +240,22 @@ When reading a line modified by another core:
 - The modified data is forwarded to requesting core. Both caches tag data as Shared. If requesting core is the only one with a copy its instead Exclusive.
 
 If a cache removes a line in Modified state. It first writes the line back to memory so memory becomes consistent again.
+
+33. Why could it be useful to have both an exclusive state and a modified state of a cache block?
+When a cache block is in Exclusive state it means it is the only owner of that memory and that the memory has not been changed. 
+If we need to evict this cache block, we would not have to store in memory since it has not been modified and we save a store operation to memory which is slow.
+
+34. Why can relaxed memory models improve performance?
+It allows for reordering and speculative execution. By not having to wait for slow memory accesses and stalling the pipeline, we can proceed with subsequent operations such as read data that might be used later in the program.
+
+35. What is the difference between Weak Ordering and Release Consistency?
+
+
+Short transactions - At an L1 cache load the L2 cache is informed such that it can detect conflicts. 
+When an L1 write is done, the modified cache block is removed from the L1 cache and moved to the L2 cache. 
+Then on subsequent read, an L1 cache miss follows. This is expected.
+
+Long transactions - Can use the L1 cache for speculative state. This means for the L2 cache to keep track on the speculative data in the L1 cache, 
+the L1 cache must be invalidated in its entirety at the start of a new transaction. That way no data that the L2 cache is not aware of can exist.
+An intial L1 cache miss is therefore expected.
 
