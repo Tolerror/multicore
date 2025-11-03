@@ -312,7 +312,32 @@ do{
 }while(!store_conditional(&a, val))
 
 44. Which memory consistency model is used for non-atomic variables in C/C++?
-Relaxed memory model??? //TODO check this
+Relaxed memory consistency model is used for non-atomic variables. 
+For atomic variables, the default is SC.
+
+45. If two threads access different element from the same array in C, is that a data-race? The same question for different struct-members?
+No, the actual accessed address is the array address pointer + an offset for the desired index.
+That way, it is not considered as a data race. The same applies for structs.
+For atomic arrays/structs the atomic object needs to be copied to a non-atomic object before accessed.
+
+46. Why do you think very few compilers implement memory_order_consume and for compilers which don’t implement it, how can libraries define it and still have working code?
+Most compilers don't implement it since it is not very widely used. Most compilers simply use an alias for _consume to simply call _acquire.
+It is not common to find use cases for only blocking subsequent operations that depends on previous memory accessses. It is also more prone to give erronous behaviour.
+C++ for instance use the alias approach.
+
+47. What does synchronizes with mean in C/C++ and how can it be achieved?
+It means that subsequently appearing synchronized blocks in the global execution order "synchronizes with" the next coming synchornized blocks
+in that order. Meaning it is guaranteed that they all synchronized blocks are executed sequentially from the view of the global order.
+
+48. What does dependency ordered mean in C/C++ and how can it be achieved? 
+An evaluation A is dependency ordered before an evaluation B if:
+Consider an atomic object M.
+A performs a release operation on M and B performs a consume operation on M and reads a value written by a side effect from the release sequence of A.
+Transitivity also holds for this case. -> (Depends)
+A -> X, X -> B, A -> B
+
+49. What does happens before mean in C/C++ and how can it be achieved?
+44-49
 
 Short transactions - At an L1 cache load the L2 cache is informed such that it can detect conflicts. 
 When an L1 write is done, the modified cache block is removed from the L1 cache and moved to the L2 cache. 
