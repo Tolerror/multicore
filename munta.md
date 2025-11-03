@@ -249,7 +249,70 @@ If we need to evict this cache block, we would not have to store in memory since
 It allows for reordering and speculative execution. By not having to wait for slow memory accesses and stalling the pipeline, we can proceed with subsequent operations such as read data that might be used later in the program.
 
 35. What is the difference between Weak Ordering and Release Consistency?
+Weak Ordering - Memory operations can be reordered freely and synchronization blocks are used where order matters (locks, barriers)
+                All memory operations needs to complete before a synchronization block and no following operations after the synchronization block may begin until the synchronization begins.
+Release Consistency - Enforces synchronization with Acquire - Release blocks. Acquire makes sure all memory operations before the acquire is finished before continuing. 
+                      Release enforces that all memory operations before the release are completed before making it visible to other threads.
+They are both relaxed memory models, but the difference is in how they allow operations to be reordered.
 
+36. What is Release Consistency and what happens at an acquire and at a release?
+In Relese Consistency the memory model is relaxed meaning memory operations can be reordered freely. An acquire ensures that subsequent operations cannot begin before all preceding operations have completed.
+A release enforces that no subsequent operation may begin before all effects from preceding operations are globally visible to all threads.
+
+37. When can memory_order_acquire and memory_order_release be useful?
+When you need to synchronize shared data between threads. 
+
+38. When can memory_order_consume be useful?
+Memory order consume is a weaker form of memory order acquire.
+It is almost the same, as in preventing subsequent operations from beginning before all preceding operations have completed.
+Although it only applies to subsequent operations that depend on effects of previous writes. So not all subsequent operations are blocked from being reordered.
+
+39. When can memory_order_relaxed be useful?
+When you need atomicity of some shared data but not synchronization. In situations where only some shared data need to be atomically updated it is a good idea 
+to have a relaxed memory model to get better performance compared to needlessly synchronizing threads when not needed. The compiler can freely reorder instructions, hence improve performance.
+Example of a use case would be counters.
+
+40. What is the main difference between the two lines that increment a variable?
+atomic_int a = 0;
+
+a += 1;
+a = a + 1;
+
+The first a += 1; is guaranteed to be atomic. It does a fetch_add(1, memory_order_seq_cst) under the hood which fetches and increments atomically. No threads can come in between operations.
+The second is an atomic fetch with a normal add which is then atomically stored. There is therefore a risk of a thread coming in between the two operations, not fully atomic.
+
+41. Explain the C11 function atomic_compare_exchange_weak. Which parameters does it take and what does it do with them? Why is it called weak?
+bool atomic_compare_exchange_weak(volatile A *obj, C* expected, C desired) 
+volatile A* obj - pointer to object.
+C* expected - pointer to what is expected to be in the expected.
+C desired - if what is expected is found, this is the desired value that should be written to the obj.
+The function compares the current value of obj with the value pointed to by expected. If equal, writes desired value to obj atomically.
+If not equal, stores the actual value of obj into expected and returns false.
+Returns true or false depending on if it succeeded or not.
+It is called weak because it may spuriously fail since it is allowed to use instructions that can spuriously fail.
+The _strong version does the same thing but guarantees success albeit slower.
+
+42. The C11 function atomic_compare_exchange_weak_explicit has two additional parameters. What are they used for?
+bool atomic_compare_exchange_weak_explicit(volatile A *obj, C* expected, C desired, memory_order succ, memory_order fail)
+The memory_order succ is the memory order that will be used if the exchange succeeds. If the exchange fails it will fall back to the memory_order fail.
+The fail ordering must be no stronger than succ since if it fails, no write occurs hence we allow freer reordering to gain performance. 
+Whereas if it succeeds we want global visibility to affiliated threads.
+
+43. Explain what the pair of instructions load-and-reserve and store-conditional are used for and what they do?
+It is a form of atomic store. The value is fetched (load-and-reserve) and reservation is made on that cache block.
+Then some computation is made which is then going to be stored in that cache block with store-conditional.
+If the reservation is still in place, meaning no other thread has written to the reserved cache block (reads are fine)
+then the variable is updated with the new value.
+If another thread had written to the cache block in between the load and store, the reservation would not be valid
+when attempting to store and the process would need to be redone. This is usually done in a while loop.
+do{
+   val = load_reserve(&a);
+   val = 100;
+   
+}while(!store_conditional(&a, val))
+
+44. Which memory consistency model is used for non-atomic variables in C/C++?
+Relaxed memory model??? //TODO check this
 
 Short transactions - At an L1 cache load the L2 cache is informed such that it can detect conflicts. 
 When an L1 write is done, the modified cache block is removed from the L1 cache and moved to the L2 cache. 
@@ -259,3 +322,6 @@ Long transactions - Can use the L1 cache for speculative state. This means for t
 the L1 cache must be invalidated in its entirety at the start of a new transaction. That way no data that the L2 cache is not aware of can exist.
 An intial L1 cache miss is therefore expected.
 
+
+An operations is considered completed when its effects are visible to all other threads. Meaning the cache coherence mechanism has running. 
+All necessary invalidations have been sent and acknowledged in the case of a store. Meaning the data is not in a speculative state, it has all been written to memory or resides in a coherent cache.
