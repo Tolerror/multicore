@@ -380,12 +380,31 @@ Ownership is now transferred to y. Meaning x can no longer be used, the same app
 if the callee does not pass back the ownership to the caller. This only applies to non-copy types which are non primitives (String, Vec<T> etc.). Primitives are instead copied (i32, bool)
 
 53. Suppose a function wants to pass a pointer to a function and then continue using the pointer after the called function has returned. How can that be done?
+It depends on what the function does with the pointer.
+In the case of the function simply doing something at the address pointed to by the pointer, as long as it is still a valid address after the modifications it can still be safely accessed.
+In the case of the function changing the address of the pointer itself, the previous address would no longer be valid and the program would seg fault. Hence a pointer to that pointer (T** ptr) would instead have to be passed.
 
+54. How do you need to modify the answer to the previous question if you want the called function to modify the pointed to object?
+Then simply passing the pointer to that object would suffice. The pointer to the pointer is not needed since the pointer to the object has not been modified.
 
-There is also shared ownership as mentioned below.
+55. What does the move in the following code mean?
+thread::spawn(move || {
+    let val = String::from("hi");
+    tx.send(val).unwrap();
+});
+The move gives the spawned thread ownership over tx since tx is not declared inside the block, it is presumably from the surrounding scope.
+Since val is declared and instantiated inside the spawn closure a move would not be needed to give ownership over it to the thread.
+
+56. What is an Arc in Rust and what can it be used for?
 With transfer of ownership the variable is wrapped in an Arc<T> for multi threading or Rc<T> for single thread.
 Then a .clone() of the reference counter is passed to the other function or thread. This way whenver any of the owners goes out of scope
 the reference counter is decremented and only ever frees T when counter == 0.
+So Arc is for sharing ownership of a variable with other threads.
+
+57. What is the key idea with transactional memory?
+Transactional memory is used for synchronization without locks. The key idea is that all memory operations within a transaction clojure are executed speculatively. If any conflicts occur midway through a transaction
+the transaction is aborted and started anew. If it successfully completes the writes are committed and written to memory. 
+There are two different types of transactional memory, software and hardware transactional memory.
 
 Short transactions - At an L1 cache load the L2 cache is informed such that it can detect conflicts. 
 When an L1 write is done, the modified cache block is removed from the L1 cache and moved to the L2 cache. 
@@ -393,7 +412,33 @@ Then on subsequent read, an L1 cache miss follows. This is expected.
 
 Long transactions - Can use the L1 cache for speculative state. This means for the L2 cache to keep track on the speculative data in the L1 cache, 
 the L1 cache must be invalidated in its entirety at the start of a new transaction. That way no data that the L2 cache is not aware of can exist.
-An intial L1 cache miss is therefore expected.
+Intial L1 cache misses are therefore expected.
+
+58. Software transactional memory for Clojure is much more reasonable than for some other languages. What makes C/C++/Java less suitable for software transactional memory compared to Clojure?
+For a software transaction to abort, all logged changes needs to be reverted. In languages like C/C++/Java a comprehensive dependency analysis needs to be done since data can have side effects.
+That makes the dependency analysis quite complex and time consuming to rollback. In Clojure all objects are immutable, meaning changes to variables are done by creating a new object. 
+Therefore the log is simple to revert by simply discarding the transaction entirely.
+
+59. Power has the following instructions for hardware transactional memory. What are they used for?
+• tbegin. - Starts a hardware transaction, marks the beginning; starts tracking memory.
+• tend. - Ends the hardware transaction. Attempts to commit the changes made within the transaction.  
+• tabort. - Explicitly aborts the current transaction, discards all speculative changes made in the transaction.
+• tsuspend. - Temporarily suspends a transaction, allows for certain non-transactional operations to execute like I/O or syscalls.
+• tresume. - Resumes a previously suspended transaction. Restores the speculative state and continues executing the transaction.
+
+60. Data partitioning is important in multicore programming. Is there a big difference in what to consider when you use locking or transactional memory? Why or why not?
+Yes, it is important to partition to maximize thread independence to improve efficiency.
+Communication with locks occurs when threads lock/unlock locks, causing lock contention and frequent synchronization creates overhead. 
+Communication with transactions occurs when transactions conflict over shared data. Conflicts cause transactions to abort and restart which slows performance. 
+
+61.  What are usually the two main issues to consider with hardware transactional memory on Power (at least if we want to avoid to many aborted transactions)? Were they a problem in your preflow-push
+program and why or why not do you think?
+- Capacity limits are to be considered. Since hardware transactions are tracked in L1 and L2 caches, if the transaction is too large it can exceed cache capacity causing automatic abort.
+- Conflict detection, if two threads access the same memory locations concurrently, a conflict may occur causing one of the transactions to be aborted and restarted to maintain atomicity.
+Both these points are directly correlated to the length of the transaction. The transactions should not be too large to increase the probability for conflicts aswell as reahing capacity limits.
+Transactions should also not be too short to cause unnecessary overhead.
+
+62. What is the meaning of dosync and ref-set in Clojure?
 
 
 An operations is considered completed when its effects are visible to all other threads. Meaning the cache coherence mechanism has running. 
