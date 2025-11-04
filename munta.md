@@ -312,13 +312,14 @@ do{
 }while(!store_conditional(&a, val))
 
 44. Which memory consistency model is used for non-atomic variables in C/C++?
-Relaxed memory consistency model is used for non-atomic variables. 
+There is no defined memory consistency model in the standard however in practice they follow a relaxed memory consistency model. 
+No synchronization or ordering guarantees are enforced unless explicitly stated in the program.
 For atomic variables, the default is SC.
 
 45. If two threads access different element from the same array in C, is that a data-race? The same question for different struct-members?
 No, the actual accessed address is the array address pointer + an offset for the desired index.
-That way, it is not considered as a data race. The same applies for structs.
-For atomic arrays/structs the atomic object needs to be copied to a non-atomic object before accessed.
+Each element in an array or member in a struct are treated as seperate objects, thus accessing two different indexes/members will not be considered a data race.
+For atomic types the object itself can only be accessed atomically.
 
 46. Why do you think very few compilers implement memory_order_consume and for compilers which don’t implement it, how can libraries define it and still have working code?
 Most compilers don't implement it since it is not very widely used. Most compilers simply use an alias for _consume to simply call _acquire.
@@ -326,18 +327,65 @@ It is not common to find use cases for only blocking subsequent operations that 
 C++ for instance use the alias approach.
 
 47. What does synchronizes with mean in C/C++ and how can it be achieved?
-It means that subsequently appearing synchronized blocks in the global execution order "synchronizes with" the next coming synchornized blocks
-in that order. Meaning it is guaranteed that they all synchronized blocks are executed sequentially from the view of the global order.
+a synchronize with relationship is a happens-before between two threads with atomic operations or synchronization primitives.
+If operation A in one thread synchronizes with operation B in another thread,
+then A happens-before B. Meaning all side effects (writes) visible before A are guaranteed to be visible to B. Changes before A are also visible after B.
+Several synchronization methods can establish a synchronize-with relationship e.g. release/acquire pair.
 
 48. What does dependency ordered mean in C/C++ and how can it be achieved? 
+Dependency ordered is a weaker relationship than synchronize-with, used specifically with memory_order_consume operations.
+It is an ordering that enforces only when there is a data dependency between operations.
+
 An evaluation A is dependency ordered before an evaluation B if:
 Consider an atomic object M.
-A performs a release operation on M and B performs a consume operation on M and reads a value written by a side effect from the release sequence of A.
+A performs a release operation on M 
+and B performs a consume operation on M and reads a value written by a side effect from the release sequence of A.
+Then A is dependency ordered before B.
 Transitivity also holds for this case. -> (Depends)
 A -> X, X -> B, A -> B
 
 49. What does happens before mean in C/C++ and how can it be achieved?
-44-49
+A happens-before relationship between two evaluations A and B means that all effects of A are visible to and ordered before B.
+If A happens-before B, B is guaranteed to see all the effects of A. No reordering between A and B is allowed.
+For a single threaded program this is setup up simply by the order in which the operations are written.
+x = 1;
+y = x + 1;
+For multi-threaded programs the synchronizes-with is the equivalent approach. Atomic operations, mutexes, etc.
+This is also transitive of course.
+
+50. Consider a store with memory order release on Power. Should the lwsync instruction be before
+or after the store, and why? (the answer would be similar for other architectures including ARM although, of course, the corresponding instruction would be called something else)
+A store with memory_order_release ensures that all memory writes and side effects before the store in program order must become visible before the store itself becomes visible to other threads.
+So the store acts like a barrier for prior operations.
+the POWER architecture allows extremely weak ordering, it can reorder practically any memory operations freely unless explicitly fenced. 
+Loads can be freely reordered with previous loads/stores and stores can be freely reordered with previous stores/loads.
+Loads and stores can be reordered, if we want to implement stronger memory models like memory_order_release we must explicitly insert memory barrier instructions.
+The POWER instruction is lwsync. It ensures that all previous memory operations are completed before any subsequent store (loads can still be speculated).
+So to enforce the release semantic of a store with memory_order_release the lwsync must be placed before the store, such that all memory operations prior to the store have completed.
+
+51. Explain what is meant by a pointer owning an object in Rust.
+In rust objects are owned by pointers to automatically manage deallocation. Objects can only ever have one owner at a time, when that owner (in this case a pointer)
+is dropped, the owned objects are also dropped. Meaning they are freed.
+Example:
+let x = Box::new(5); // Box<i32>
+when x goes out of scope, the owned pointer Box<i32> is also freed.
+Box<i32> is a pointer that owns the i32 object (5). When Box<i32> goes out of scope, so does the heap allocated i32 (5).
+
+52. Explain what is meant by moving an object in Rust.
+Moving an object in Rust is done by transfer of ownership, since every object in Rust has an owner.
+When a variable is transferred as in an assignment e.g.
+let x = String::from("hello");
+let y = x;
+Ownership is now transferred to y. Meaning x can no longer be used, the same applies to argument passing to functions. When an argument has been passed, it is no longer available in the calling function
+if the callee does not pass back the ownership to the caller. This only applies to non-copy types which are non primitives (String, Vec<T> etc.). Primitives are instead copied (i32, bool)
+
+53. Suppose a function wants to pass a pointer to a function and then continue using the pointer after the called function has returned. How can that be done?
+
+
+There is also shared ownership as mentioned below.
+With transfer of ownership the variable is wrapped in an Arc<T> for multi threading or Rc<T> for single thread.
+Then a .clone() of the reference counter is passed to the other function or thread. This way whenver any of the owners goes out of scope
+the reference counter is decremented and only ever frees T when counter == 0.
 
 Short transactions - At an L1 cache load the L2 cache is informed such that it can detect conflicts. 
 When an L1 write is done, the modified cache block is removed from the L1 cache and moved to the L2 cache. 
