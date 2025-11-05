@@ -439,7 +439,8 @@ Both these points are directly correlated to the length of the transaction. The 
 Transactions should also not be too short to cause unnecessary overhead.
 
 62. What is the meaning of dosync and ref-set in Clojure?
-
+dosync is the syntax for a software transaction. All operations on ref's in the dosync block are to be executed atomically. If a conflict occurs, the transaction aborts and retries.
+ref-set sets a new value to a ref. The ref is then set to point to the new immutable value (new obj), incase of a conflict the ref can simply be set to point to the old value again. Ref-set can only be used inside a dosync block.
 
 An operations is considered completed when its effects are visible to all other threads. Meaning the cache coherence mechanism has running. 
 All necessary invalidations have been sent and acknowledged in the case of a store. Meaning the data is not in a speculative state, it has all been written to memory or resides in a coherent cache.
