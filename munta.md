@@ -442,5 +442,118 @@ Transactions should also not be too short to cause unnecessary overhead.
 dosync is the syntax for a software transaction. All operations on ref's in the dosync block are to be executed atomically. If a conflict occurs, the transaction aborts and retries.
 ref-set sets a new value to a ref. The ref is then set to point to the new immutable value (new obj), incase of a conflict the ref can simply be set to point to the old value again. Ref-set can only be used inside a dosync block.
 
-An operations is considered completed when its effects are visible to all other threads. Meaning the cache coherence mechanism has running. 
+63. Even if a thread that has taken a mutex only intends to use it to update a few pointers, other threads may have to wait a long time. How can that be? Give some example of ”unexpected delays”.
+Preemption by the OS scheduler. Thread holding the mutex gets interrupted before it finishes the quick work. CPU time to another process -> all threads waiting for mutex are blocked till holder runs again.
+Cache miss/page fault. Memory inside critical section is not in memory, load from disk. Data not in cache, must fetch from memory.
+I/O operations inside critical section. 
+Priority inversion. Low-priority thread holds mutex. High-priority thread waits for it. Medium-priority thread keeps running, preventing low-prio from running and releasing lock. Indirect blocking of high-prio.
+
+64. What is the ABA-problem and how can your C/C++ program crash due to it (unless you avoid it)?
+x had value A, then B, then A again. It is a problem when trying to detect a data race to a supposedly atomic variable.
+We dont know if the variable was changed or not.
+When it can crash:
+If a pointer to something is freed then malloced again. A thread may think it still has the pointer which it does, but accessing a field of that pointer (.next for example) won't work.
+
+65. How can the ABA-problem be avoided in C/C++ in codes where objects are allocated and deallocated with the heap manager (malloc/free and new/delete).
+With the use of hazard pointers. //TODO better explanation of hazard pointers
+
+66. Under which circumstances can you have the ABA-problem also in Java?
+Normally the GC prevents true ABA from occuring although logical ABA can still occur.
+With AtomicReference. Reference change A->B->A (same reference observed again).
+Another thread T2 can come in between T1's CAS and change the value of A to B then back to A. The reference is the same but the value A might be different.
+
+67. Explain the terms:
+• blocking vs non-blocking - Algorithm is blocking if one thread can delay another thread. Non-blocking if the opposite.
+• lock-free - If atleast one thread can make progress after a finite number of steps. Program makes progress but individual threads may wait (cant wait forever).
+• wait-free - If every thread can make progress after a finite number of steps. 
+
+68. Describe the main ideas of how a lock-free stack can be implemented in C. Which variable(s) need to be atomic and why?
+
+69. Describe the main ideas of how a lock-free queue can be implemented in C. Which variable(s) need to be atomic and why? In a queue, two variables need to be modified but the atomic operations can only modify one at a time. How can that be solved?
+
+70. Explain the terms:
+• true dependence - When an execution depends on a previous execution. Write to read for some variable.
+Ex: S1: x = a + b;
+    S2: y = x + 1;
+    S1 must execute before S2.
+
+• output dependence - L1 writes a memory location later overwritten by L2. Write to Write for same variable.
+• anti dependence - L1 reads a memory location later overwritten by L2. Read to write for same variable.
+
+71. Suppose you have a large (millions lines of code) C program with matrix computations that needs to be parallelized, and that both IBM’s and Nvidias parallelizing compilers fail to improve the performance. 
+What would then the main strength of OpenMP be, and how can you know where to start in the code?
+The main strength of OpenMP is the explicit control to inject parallelization at parts of the code that can be run in parallel.
+Meaning it is the programmers job to find hot spots and be certain that the code is independent and can be run in parallel. Avoiding compiler having to guess about dependencies.
+How to identify hot spots? Tools like perf/operf to see which loops/functions take the most time.
+Can use OpenMP mechanism like private such that iterations do not have data dependencies.
+
+72. What is a so called perfect loop nest and why is that a useful concept for a compiler that wants to execute loop iterations in a different order than specified in the source code?
+Perfect loop nest - A set of nested loops where the only statements are inside the inner loop of the innermost body.
+It is useful because it simplifies dependence analysis. Since there is no code in between loops it can easily deduce which iterations are independent, thus be reordered or parallellized.
+
+73. What is meant by data dependence equation and what does the existence of a solution tell the compiler?
+The data dependence equation is an equation using the lower and upper bounds of nested loops as a matrix along with the index variables say i,j and the constants in the bounds
+to solve for an integer solution. The solution/solutions gives the indices of the index variables that are dependent in the nested loops. If the integer solution is not found, it means there is no data dependence.
+If an integer solution is found AND it is within the loop bounds, there is a data dependence.
+This tells the compiler which parts of the nested loop that cannot be reordered, hence not optimized.
+
+74. If the compiler has found a solution to a data dependence equation, how can it check if that solution is within the loop bounds?
+It substitutes the solution into the loop bound inequalities to see if it lies inside the iteration space.
+If it does, the dependence is real.
+If not, its irrelevant and the loop can be optimized.
+
+75. What is meant by dependence distance and what is the dependence matrix?
+Given that we have found the two solutions of a 2D matrix, we know the iterations that access the same matrix element.
+Ex. Solution: (1,3,4) and (1,3,9). Subtracting these two gives us the dependence distance (0,0,5) meaning the iterations/distance that have dependence.
+The 1st and 2nd loops have 0 distance meaning they can be optimized. The last loop has a distance 5 meaning 4 of the loops can be optimized/ran concurrently but 5 iterations are dependent and cannot be optimized.
+
+The dependence matrix is then the collection of all dependence distance vectors for all pairs of dependent accesses.
+Each row represents one dependence between two iterations.
+Each col corresponds to a loop level.
+
+76. If needed, the compiler can (sometimes) compute a loop transformation matrix U. Why should U be unimodular?
+
+77. Given U and the loop bounds of the original loop nest, how can it compute the new loop bounds, in principle?
+
+78. For each of the cache miss types listed below, first explain what it means, and then what you can do to try to reduce their number.
+• true sharing miss - Occurs when multiple threads access the same memory location. If one writes, the cache line becomes invalidated in other cores causing cache misses. (real data dependency).
+To reduce: Reduce contention on shared variables. ex. split global counter to multiple thread local counters, then sum at the end. Use efficient atomic operations instead of heavy locks if possible.
+• false sharing miss - Occurs when multiple threads access different memory locations but they reside on the same cache line. Writes to one variable invalidates the cache line for other threads. (even though they arent actually sharing data).
+To reduce: Be mindful of memory layout. Separate arrays or structures for each threads frequently updated data. Pad frequently written variables so that they are on separate cache lines.
+
+79. Why is it much easier to do data prefetching for arrays than for linked-lists and trees?
+Since memory for arrays are stored contiguously. It is easy for the CPU to calculate the address of the next element.
+To prefetch for lists and trees it needs to traverse the lists and trees since memory is allocated dynamically and is scattered.
+
+80. Why can software initiated data prefetching (created by the compiler or manually by the programmer) sometimes slow down the program instead of making it faster?
+Prefetch too early, if you prefetch data long before it is needed, it may be evicted from cache before use -> still cache miss and wasted memory bandwidth.
+Prefretch too late, prefetch too close to time of need -> may not arrive in time, latency penalty.
+Too much prefetching, increase memory traffic, possibly evicting useful data from cache.
+CPU overhead.
+Incorrect prefetches, prefetch data that is never used, wasting bandwidth and cache space.
+
+81. How can hardware quite easily do data prefetching and normally for which kind of data structure?
+Hardware can prefetch in parallell with execution, hiding memory latency. Doesnt need extra explicit instructions.
+Detects sequential access patterns. Can assume future accesses will follow same pattern. Very effective (sequential accesses)
+Normally for arrays, since they are stored contiguously making it easy to calculate next element addresses.
+
+82. What can go wrong if you prefetch data and request ownership?
+Can cause unnecessary traffic (unnecessary invalidations). Prefetched lines may evict useful data from cache.
+Can cause False sharing. If multiple cores fetch data in same cache line and atleast one writes to its variable->cache coherence takes effect.
+Although different data is accessed, cache coherence protocol treats whole cache line as a single unit.
+Causes unnecessary cache invalidations and memory traffic.
+
+83. How can hardware transactional memory help (help as in make it better) a parallelizing compiler?
+One of the challenges for parallellizing compilers is data dependence.
+Compiler must detect read/write conflicts between parallel iterations.
+With HTM the compiler can speculatively parallelize code even if its uncertain about conflicts (unsure if parallelizable).
+If conflict occurs at runtime, hardware aborts and rolls back transaction. This reduces the need for conservative static analysis by compiler.
+Enables compiler to be more aggressive in parallelization, doesnt have to be too conservative. Less static dependence checking. Handles conflicts at runtime, instead of compiler inserting locks.
+
+84. If you are implementing a new lock-free data-structure and are trying to understand why it sometimes crashes (very rarely), how can C11Tester be helpful? What does it do?
+C11Tester is used to explore all possible executions in the program by creating a graph of all modification orders of atomic variables. 
+Using the graph it checks that all executions are actually tested and finds modification orders that triggers bugs. 
+
+Operation completeness:
+An operations is considered completed when its effects are visible to all other threads. Meaning the cache coherence mechanism has run. 
 All necessary invalidations have been sent and acknowledged in the case of a store. Meaning the data is not in a speculative state, it has all been written to memory or resides in a coherent cache.
